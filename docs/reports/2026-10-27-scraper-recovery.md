@@ -18,6 +18,19 @@
 
 06:27 服务器主 runner 独立 JSON 试跑共 399 条（悉尼 200、墨尔本 199）、20 页，实际退出 0、错误 0、付费请求/连接/字节均 0；普通响应记录 4,151,043 bytes，描述和入住日期留待跨站补全。本机同一入口也实际退出 0，399 条 / 20 页 / 付费 0。源码 62e0436 已通过本机和服务器 91 项测试；随后复核补上根查询不能接受意外价段、卧室、额外地区或其他限制的校验，以及旧入口 JSON 分页兼容。全量仍需续跑验证。
 
+02e3817 已部署并通过本机/服务器 93 项测试。06:42 用 worker 4170986 续跑原主任务，保留既有价段；悉尼 Domain 已连续推进，但墨尔本根查询仍有 403，不能宣称整体稳定。新会话不一定能复现一轮成功，浏览器配置、会话与出口需分别验证。
+
+| 后续开源实验 | 实际结果 | 费用与边界 |
+| --- | --- | --- |
+| Camoufox 0.5.8 / Firefox 156，固定内置 Linux preset、排除默认 uBO、保留 preset 语言 | 隔离源码 dd26476 的主 runner 两城 20 页 / 397 条，真实退出 0、错误 0；独立全量继续运行 | AU 请求/连接/字节均 0；源码 94 项本机及隔离服务器测试通过 |
+| [Apostate v0.5.1](https://github.com/heretic-tech/apostate) / Chromium 155，Patchright 驱动原始 binary、固定 seed / Linux persona | 两城各 2 页，80 条真实元数据及 ID 校验通过，真实退出 0 | 5,826,047 普通响应字节，付费 0；GPL-3.0；不使用 SDK/Widevine。观察到时区 Etc/Unknown，未证明长期稳定 |
+
+Apostate 使用官方发布归档，SHA-256 `351955271b7ba1aed314bf14c2d64f6bd59bfdcb5c4a1541c9c921c570ff97bb` 已核验。其他候选的“全部检测通过”宣传不作本项目验收依据。
+
+Camoufox 独立全量只写自己的 SQLite 与断点，源库和主库分开；只有真实完整结束、范围/覆盖/行身份通过、付费 0 时才允许导入，导入后仍须主 runner 复核建立基线。07:00 时该任务已过 100 页、1,891 条，错误 0、AU 字节 0；主任务 Domain 悉尼 8,873 条。两者均未在此时完成。
+
+最新一次 AU 原生浏览器对照的 750 KB 硬上限在首页后耗尽，搜索未取得响应，因此属于预算中止，不能当作 AU 成功或 403 证据。另一次诊断被出口规则分到普通流量，已标记 invalid_routing_probe，仅 IP 检查走 AU。两次合计付费中继 757,504 bytes，来自已有额度，无新增购买。
+
 ## 仓库与部署
 
 - 当前维护 fork：[fisher-byte/qrent](https://github.com/fisher-byte/qrent)。后续只推送此 fork；本机 upstream 推送已禁用，fork 的 GitHub Actions 已禁用。
@@ -107,6 +120,8 @@ Domain 使用官方 Sydney Region NSW / Melbourne Region VIC 搜索。Real Estat
 **03:00** 在线备份使用 SQLite backup API 包含 WAL 已提交数据，**03:10** 只清理备份根目录 30 天前普通 `.db`，回滚子目录不受影响。crond 已确认 active。
 
 10 月 28 日真实 cron 已在主任务持锁时退出 75；03:00 备份已实际生成 66,482,176 bytes 的 `properties_20261028.db`，日志记录路径，未依赖手动触发。
+
+数据增长后，主库约 229 MB、根盘余量约 3.9 GB，原先 30 份未压缩备份会超出空间。新增兼容的 `ops/backup_sqlite.py --gzip`：在线复制含 WAL 的一致快照，quick_check 后流式压缩、0600、原子替换，失败保留上个有效备份。一次真实只读试验约 229.4 MB → 37.0 MB（节省 83.87%），7.63 秒；解压恢复后 quick_check 和两表行数核验通过，临时副本已清理。100 项本机测试通过；此处记录的是候选实测，cron 的正式切换待主任务释放部署锁后执行。
 
 - 首次恢复备份：`/root/qrent-scraper/backup/pre-recovery-20261027`。
 - 出口修复备份：`/root/qrent-scraper/backup/pre-egress-20261027_220341`。

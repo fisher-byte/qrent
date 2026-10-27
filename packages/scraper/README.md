@@ -65,6 +65,8 @@ BROWSER_ENGINE=camoufox .venv/bin/python recovery_runner.py \
 
 服务器启动模板是 `ops/run_recovery.sh`：带独占锁、2 小时超时、每次约 30 MB 代理传输上限及正确退出码。原目录的每日 02:00 cron 可继续调用 `/root/qrent-scraper/run_scraper.sh`。`ops/backup_sqlite.py` 使用 SQLite 在线备份接口，能包含 WAL 中已经提交的记录。
 
+`ops/backup_sqlite.py DATABASE DIRECTORY --gzip` 可生成私有的 `.db.gz`：先校验完整快照，再流式压缩和原子替换。失败保留上一份有效备份；恢复时先解压到新的 `.db` 文件，并用 `PRAGMA quick_check` 检查后再使用。压缩选项不改变默认 `.db` 命令。
+
 验证采集模块：`python -m unittest discover -s tests -v`。
 
 Domain 的可选开源驱动是 [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright-python)（Apache-2.0）。安装 `requirements-fingerprint.txt` 后设置 `DOMAIN_BROWSER_ENGINE=patchright`，使用已安装 Chrome 或 `CHROMIUM_EXECUTABLE_PATH`。遵循项目推荐的持久化、headful、`no_viewport` 配置，保留真实浏览器的 UA、语言和窗口；生产是否通过另看恢复报告。Real Estate 继续使用 [Camoufox](https://github.com/daijro/camoufox)（MPL-2.0）。
