@@ -2,16 +2,16 @@
 
 ## 当前结论
 
-服务器代码、专用 SSH、本机部署和两站采集已恢复。两城多区域试跑真实退出 0，取得 570 条，供应商实际扣量约 3.69 MB。首次整个都会区扫描尚待完成，不能把这个试跑称为全量验收；下面分别列出已验证结果与后续全量状态。
+服务器代码、专用 SSH、本机部署和两站采集已恢复。两城多区域试跑真实退出 0，取得 570 条，供应商实际扣量约 3.69 MB。首次整个都会区扫描仍在进行，不能把这个试跑称为全量验收；下面分别列出已验证结果与后续全量状态。
 
-2026-10-28 00:23 启动 `metro-full-20261028`，独立 worker PID 4050859，300 MB 传输上限、18 小时超时。Real Estate 正在翻页；Domain 新会话首屏返回 403，两个查询保留失败状态，继续排查普通直连路径。全量结束前不会建立有效基线，也不会报告全量成功。开始前供应商余量为 849.32 MB（排序核验另消耗约 0.21 MB）。
+2026-10-28 00:23 启动 `metro-full-20261028`，独立 worker PID 4050859，300 MB 传输上限、18 小时超时。初期 Domain 首屏 403；后续使用原生 Firefox 网络完成独立验收并恢复直连采集。全量结束前不会建立有效基线，也不会报告全量成功。01:43 主动中断旧进程（真实退出 130）切换版本，保留 3,787 条 Real Estate / 163 个已存列表页；01:48 用 worker PID 4078332 从断点续跑，优先处理 Domain。开始前供应商余量为 849.32 MB（排序核验另消耗约 0.21 MB）。
 
 ## 仓库与部署
 
 - 当前维护 fork：[fisher-byte/qrent](https://github.com/fisher-byte/qrent)。后续只推送此 fork；本机 upstream 推送已禁用，fork 的 GitHub Actions 已禁用。
 - 原仓库 [wiperi/qrent](https://github.com/wiperi/qrent) 是 monorepo，后端在 `packages/backend`，未发现另一个对应的可访问后端仓库。
 - [Real Estate](https://github.com/fisher-byte/qrent/blob/main/packages/scraper/src/scrapers/realestate.py)、[Domain](https://github.com/fisher-byte/qrent/blob/main/packages/scraper/src/scrapers/domain.py)；都会区入口 `packages/scraper/metro_runner.py`。
-- 腾讯云 `139.199.73.159`（`VM-0-10-tencentos`）：原目录 `/root/qrent-scraper`，release `/root/qrent-scraper/releases/recovery-20261027`，原库 `/root/qrent-scraper/properties.db`。
+- 腾讯云生产实例（`VM-0-10-tencentos`）：原目录 `/root/qrent-scraper`，release `/root/qrent-scraper/releases/recovery-20261027`，原库 `/root/qrent-scraper/properties.db`。
 - 此部署写 SQLite；网站主后端使用 MySQL。不能把本次 SQLite 入库称为网页数据库已经同步。
 
 原说明提到的 `packages/tt.scraper-v2` 没有提交，且根目录 `tt*` 规则会忽略它。实际停运的独立代码已从服务器取回，未丢失。
@@ -20,8 +20,9 @@
 
 旧 cron 和代码仍在，旧 HK gost/SSH 代理返回 `ERR_TUNNEL_CONNECTION_FAILED`。旧 shell 经 `tee` 丢失退出码，0 条也会显示完成。新流程保留原库，按来源和房源 ID upsert；失败、空页、预算耗尽和未完成范围会返回非零，保留断点，不下架未扫描的历史记录。
 
-- Domain 直连；Real Estate 关键页面与验证请求走 AU 住宅代理。每个付费查询验证澳洲出口，并使用同一个已验证的黏性会话。
-- 所有脚本和样式走无认证普通网络；图片、字体、视频不下载，保留图片链接。普通请求失败不会转付费补拉。
+- Domain 使用原生 Firefox 直连，保留正常 HTTP 缓存与资源加载；通过被动事件记录请求和字节，仅未代理模式允许启用。Real Estate 关键页面与验证请求走 AU 住宅代理。每个付费查询验证澳洲出口，并使用同一个已验证的黏性会话。
+- Real Estate 脚本和样式走无认证普通网络，图片、字体、视频不下载，保留图片链接；Domain 原生模式的资源使用普通网络。普通请求失败不会转付费补拉。
+- Real Estate 的公开脚本/样式增加单浏览器内存缓存（32 MB / 128 项 / 单项 4 MB / TTL 最多 300 秒），尊重缓存禁令、重取、Cookie 与 Vary；命中仍检查预算，另记 cache_hits / cache_saved_body_bytes。实际全量提速待日志测量。
 - loopback HTTP/CONNECT 出口也统计浏览器后台连接，仅房源目标和小型 IP 校验走付费。过滤规则、更新、视频组件走普通网络。`proxy_wire_bytes` 与页面计数分别记录，预算同时约束两项，供应商读数另行核对。
 - Domain 详情复用同一次列表浏览器，修复切换浏览器指纹后出现的 403。Real Estate 的 `Vic` 等州名统一转大写后校验。
 - Real Estate 列表内嵌数据已有完整描述、可入住日期、图片链接与位置，通常无需额外详情请求。两站保留各自 ID 和链接，同地址含房号、价格、卧室相同的近期完整信息可复用，隐藏地址不跨站匹配。
@@ -44,6 +45,7 @@ Domain 使用官方 Sydney Region NSW / Melbourne Region VIC 搜索。Real Estat
 | --- | --- | --- | ---: |
 | `egress-acceptance` | Domain 40、Real Estate 50 | 退出 1；2 个 Domain 详情 403 | 773,877 bytes |
 | `domain-session-acceptance` | Domain 40、实际详情 2 | 退出 0，错误 0 | 0 bytes |
+| Domain 原生网络独立候选 | Domain 两城各 60、实际详情 2 | 退出 0，错误 0 | 0 bytes |
 | `metro-pilot-20261027` | 见下表 | 修复州名后续跑，退出 0，错误 0 | 3,690,740 bytes |
 
 试跑于 2026-10-28 00:15:40 完成，24 个列表页，Domain 实际详情 2 个成功。初次运行因 `Vic` 州名格式失败，修复后只续跑失败区域，成功页没有重抓；一次 429 在有界重试后恢复。供应商和传输总量包含这些失败尝试。
@@ -55,11 +57,11 @@ Domain 使用官方 Sydney Region NSW / Melbourne Region VIC 搜索。Real Estat
 
 付费出口仅 `www.realestate.com.au`、`ipinfo.io`、`api.ipify.org`；普通页面下载 182,823,912 bytes，普通后台中继 33,096,979 bytes。页面与中继是不同层次的计数，不能直接相加后称为准确账单传输。
 
-本机和服务器通过 54 项采集专项测试，包括真实本地 TCP 出口、认证隔离、配额、资源关闭、地区/分页/总量校验、续跑、字段保留、排序和增量早停。保存的真实两站排序页面也通过新元数据校验。
+本机和服务器于 01:45 通过 73 项采集专项测试（部署源码 8255ed8），包括真实本地 TCP 出口、认证隔离、配额、资源关闭、地区/分页/总量校验、续跑、字段保留、排序、增量早停、真实本地 HTTP 静态缓存及原生网络计数。保存的真实两站排序页面也通过新元数据校验。
 
 ## 费用与流量
 
-只购买了一次性 Residential Lite 1GB，实付 **USD 0.30**、无自动续费；账户余额 **USD 2.70**。本轮累计购买上限 **USD 1.50**，包含这 USD 0.30。现有额度足够先跑全量，没有为了用完预算继续购买。
+只购买了一次性 Residential Lite 1GB，实付 **USD 0.30**、无自动续费。本轮累计购买上限 **USD 1.50**，包含这 USD 0.30。现有额度足够先跑全量，没有为了用完预算继续购买。
 
 | 阶段 | 供应商剩余量 | 该阶段实际扣量 |
 | --- | ---: | ---: |
@@ -67,7 +69,7 @@ Domain 使用官方 Sydney Region NSW / Melbourne Region VIC 搜索。Real Estat
 | 初次州名失败后 | 851.07 MB | 2.15 MB |
 | 修复续跑完成后 | 849.53 MB | 试跑累计 3.69 MB |
 
-按 USD 0.30/GB 折算，试跑消耗的额度价值约 **USD 0.0011**；这不是新增付款。不要把余额 USD 2.70 当作代理剩余 GB，也不要把传输记录代替供应商最终扣量。
+按 USD 0.30/GB 折算，试跑消耗的额度价值约 **USD 0.0011**；这不是新增付款。传输记录不能代替供应商最终扣量。
 
 以下为试跑推算，尚非全量/整日实测：
 
@@ -77,6 +79,8 @@ Domain 使用官方 Sydney Region NSW / Melbourne Region VIC 搜索。Real Estat
 | 普通一天增量 | 20–60 MB | USD 0.006–0.018 |
 
 估算使用每页约 0.17–0.21 MB（含启动、出口校验和试跑失败开销）、两站分页数及每区至少 3 页已知记录。市场变化、区域重叠、验证码或重试会改变实际消耗。全量命令记录上限 300,000,000 bytes；未完成时明确失败，保留断点。最终全量实际数字在完成后补记。
+
+全量第一阶段和同期诊断的供应商余量从 849.32 MB 变为 **823.69 MB**，同期扣量 **25.63 MB**。主任务中继记录 25,315,703 bytes；另两次有界 Domain 诊断共记录 328,909 bytes，均未解决 403，因此正式版本仍保持 Domain 直连。01:48 之后 Domain 已继续分页，AU 计数保持不变。上述消耗来自已有额度，没有新增付款。
 
 ## SSH、部署、定时任务与回滚
 

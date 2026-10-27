@@ -27,7 +27,7 @@ A modular collector for Australian rental listings from Domain and Real Estate. 
 - `metro_runner.py` 用 Domain 的 Sydney Region / Melbourne Region，以及 `src/config/metro_regions.json` 中的 Real Estate 区域组覆盖都会区。Real Estate 的部分区域组包含相邻边缘市场；每条结果保留原站点 ID、州、邮编与链接。
 - 旧 `sydney - greater region` 搜索会被 Real Estate 解析成 CBD。新流程校验官方位置 ID，拒绝悄悄缩小范围。
 - Domain 的结果窗口最多 50 页、Real Estate 最多 80 页。超过窗口时递归分价段并按来源 ID 去重；检查每页结构化搜索 ID、叶查询与根查询的唯一总量，缺失时保留断点并返回非零。
-- Real Estate 列表内嵌数据提供描述、可入住日期、图片链接和位置，通常不需要再打开详情页。图片文件不下载；Domain 可复用同址、同价、同卧室的完整信息，隐藏地址不参与跨站匹配。
+- Real Estate 列表内嵌数据提供描述、可入住日期、图片链接和位置，通常不需要再打开详情页，其图片文件不下载。Domain 使用原生 Firefox 普通网络，保留浏览器自身缓存和正常资源加载；可复用同址、同价、同卧室的完整信息，隐藏地址不参与跨站匹配。
 - `state.json` 是私有续跑断点，`result.json` 是范围、质量、错误、流量报告；同时输出两站按城市分开的 `.csv.gz`。后台进程状态另写 `process-status.json`，不能仅凭结果文件推断进程结束。
 - `remote_capture.py start --resume` 只在旧进程确已终止后续跑。断点绑定区域配置、规划版本和根查询集合，范围改变时拒绝沿用。
 - `ops/run_metro.sh` 供现有每日 02:00 任务调用；`auto` 在缺少有效全量基线或基线超过 7 天时全量刷新，其他日期做增量采集。未完成全量不建立基线；未扫描和失败的数据不自动下架。
@@ -43,6 +43,7 @@ A modular collector for Australian rental listings from Domain and Real Estate. 
 python3.11 -m venv .venv
 .venv/bin/pip install -r requirements-fingerprint.txt
 .venv/bin/python -m camoufox fetch
+.venv/bin/python -m playwright install firefox
 # 从 .env.example 配置私有 .env；代理地区必须是 AU。
 chmod 600 .env
 BROWSER_ENGINE=camoufox .venv/bin/python recovery_runner.py \
@@ -55,7 +56,7 @@ BROWSER_ENGINE=camoufox .venv/bin/python recovery_runner.py \
 - AU 代理故障或额度耗尽时保留 Domain 的直连结果，Real Estate 单独记为失败，整个任务返回部分完成。
 - 同时选择 `--scrapers domain realestate` 时先运行 Domain，再按完整地址（含房号、州、邮编）、价格、卧室数复用最近 7 天内完整详情；可用 `--full-details` 强制重新读取。
 - 详情总量由 `--detail-limit` 限制，单区由 `--details-per-area` 限制；超出明确限额的详情留待后续采集。列表仍保留两个站点各自的 ID 和链接。
-- 每次运行默认最多 1000 个网络请求和约 30 MB 已记录代理传输，图片、视频、字体不下载，公共 CDN 资源走无认证直连。供应商用量与应用计数可能因协议开销不同。
+- 此恢复入口默认最多 1000 个网络请求和约 30 MB 已记录代理传输；Real Estate 图片、视频、字体不下载，公共 CDN 资源走无认证直连。Domain 原生网络资源全部使用普通流量。供应商用量与应用计数可能因协议开销不同。
 - 站内 JavaScript（含应用包及验证 SDK）也走无认证普通网络，AU 会话只用于页面和验证/数据交互；最新节流规则的服务器部署状态见恢复报告。
 - 浏览器的 loopback HTTP/CONNECT 出口把后台更新、过滤规则和视频组件连接也分到普通网络；`proxy_wire_bytes`、`direct_wire_bytes`、`wire_hosts` 包含这些连接的传输记录。页面拦截统计不等于供应商扣量，配额同时检查页面与中继两项代理计数。
 - 按运行生成 CSV 和 `*_result.json`；`success` 退出 0，空结果、详情失败或部分扫描退出非零。临时浏览器配置运行后自动清理；诊断时可用 `--keep-profiles` 保留。
