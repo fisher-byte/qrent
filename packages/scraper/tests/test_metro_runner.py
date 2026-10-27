@@ -20,6 +20,7 @@ class Harness:
     def __init__(self, spec, fail_pages=(), metadata_failures=0, navigation_failures=0):
         self.spec, self.fail_pages = spec, set(fail_pages)
         self.visits, self.sessions, self.verified = [], [], []
+        self.browser_geoips = []
         self.detail_calls = 0
         self.current = None
         self.metadata_failures = metadata_failures
@@ -27,6 +28,7 @@ class Harness:
 
     def browser_factory(self, source, **kwargs):
         harness = self
+        self.browser_geoips.append(kwargs.get('geoip_address'))
         class Browser:
             def create_driver(self): harness.sessions.append(os.environ['PROXY_SESSION'])
             def navigate(self, url, **kwargs):
@@ -66,9 +68,9 @@ class Harness:
                 harness.detail_calls += len(props)
         return Scraper()
 
-    def verify(self, source, budget):
+    def verify(self, source, budget, **kwargs):
         self.verified.append(os.environ['PROXY_SESSION'])
-        return {'country': 'AU'}
+        return {'country': 'AU', **({'ip': '203.0.113.7'} if kwargs.get('include_ip') else {})}
 
     def run(self, args, queries):
         with patch.object(runner, 'metro_queries', return_value=queries), \
@@ -87,6 +89,33 @@ def arguments(folder, source='domain', mode='full'):
 
 
 class MetroRunnerTests(unittest.TestCase):
+    def test_failed_child_resume_preserves_completed_partitions_even_with_legacy_failed_root(self):
+        failing = True
+        def spec(query, page):
+            if query.low is None:
+                return {'total': 4, 'pages': 1, 'ids': ['A', 'B']}
+            if query.high is not None:
+                return {'total': 2, 'pages': 1, 'ids': ['A', 'C']}
+            if failing:
+                raise SearchMetadataError('Temporarily blocked leaf')
+            return {'total': 2, 'pages': 1, 'ids': ['B', 'D']}
+        with tempfile.TemporaryDirectory() as folder:
+            args, root = arguments(folder), SearchQuery('domain', 'sydney')
+            first = Harness(spec).run(args, [root])
+            self.assertEqual(first['exit_code'], 1)
+            state_path = args.output / 'state.json'
+            state = json.loads(state_path.read_text())
+            self.assertEqual(state['queries'][root.key]['status'], 'split')
+            # Older checkpoints incorrectly marked a split root failed as well.
+            state['queries'][root.key].update(status='failed', next_page=1, hashes=[])
+            state_path.write_text(json.dumps(state))
+            failing = False
+            resumed = Harness(spec)
+            result = resumed.run(args, [root])
+            self.assertEqual((result['exit_code'], result['listings']), (0, 4))
+            self.assertEqual(resumed.visits, [1])
+            self.assertTrue(result['complete_inventory'])
+
     def test_blocked_domain_session_retries_current_page_in_a_fresh_direct_browser(self):
         harness = Harness(lambda query, page: {'total': 2, 'pages': 1, 'ids': ['A', 'B']}, navigation_failures=1)
         with tempfile.TemporaryDirectory() as folder:
@@ -198,6 +227,8 @@ class MetroRunnerTests(unittest.TestCase):
             result = harness.run(args, [SearchQuery('realestate', 'sydney', 'Western Sydney, NSW', 'atlas')])
             self.assertEqual(result['exit_code'], 0)
             self.assertEqual(harness.verified, harness.sessions)
+            self.assertEqual(harness.browser_geoips, ['203.0.113.7'])
+            self.assertNotIn('ip', result['exit'])
 
     def test_split_queries_deduplicate_and_check_parent_inventory(self):
         def spec(query, page):
@@ -205,10 +236,12 @@ class MetroRunnerTests(unittest.TestCase):
             if query.high is not None: return {'total': 2, 'pages': 1, 'ids': ['A', 'C']}
             return {'total': 2, 'pages': 1, 'ids': ['B', 'D']}
         with tempfile.TemporaryDirectory() as folder:
-            result = Harness(spec).run(arguments(folder), [SearchQuery('domain', 'sydney')])
+            harness = Harness(spec)
+            result = harness.run(arguments(folder), [SearchQuery('domain', 'sydney')])
             self.assertEqual((result['exit_code'], result['listings']), (0, 4))
             self.assertTrue(result['complete_inventory'])
             self.assertEqual((result['coverage'][0]['expected'], result['coverage'][0]['unique']), (4, 4))
+            self.assertEqual(len(harness.sessions), 1)
 
     def test_increased_resume_budget_keeps_previous_traffic(self):
         budget = runner.restore_budget({'proxy_wire_bytes': 1100, 'requests': 10, 'exhausted': True},

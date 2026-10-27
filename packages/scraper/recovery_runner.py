@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Bounded Domain-first capture for the existing Qrent SQLite deployment."""
 import argparse
+import ipaddress
 import csv
 import json
 import logging
@@ -62,7 +63,7 @@ def build_parser():
     return parser
 
 
-def verify_au_proxy(source, budget):
+def verify_au_proxy(source, budget, *, include_ip=False):
     proxy = ProxyPool(source).config()
     if not proxy:
         raise RuntimeError("An Australian proxy is required; configure PROXY_SERVER/USERNAME/PASSWORD")
@@ -76,7 +77,10 @@ def verify_au_proxy(source, budget):
         info = response.json()
         if info.get("country") != "AU":
             raise RuntimeError("Proxy exit country was not AU; capture stopped")
-        return {key: info.get(key) for key in ("country", "region", "org")}
+        result = {key: info.get(key) for key in ("country", "region", "org")}
+        if include_ip:
+            result['ip'] = str(ipaddress.ip_address(info['ip']))
+        return result
 
 
 def write_csv(properties, path):

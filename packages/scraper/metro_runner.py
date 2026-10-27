@@ -62,6 +62,13 @@ def campaign_options(args, queries):
             'root_queries': sorted(query.key for query in queries)}
 
 
+def unfinished_children(state, key):
+    for child in state['queries'][key].get('children', []):
+        if state['queries'][child]['status'] not in {'done', 'split'} or unfinished_children(state, child):
+            return True
+    return False
+
+
 def initial_state(args, mode, queries, store):
     columns = ('house_id', 'source', 'price_per_week', 'address_line1', 'suburb', 'state', 'postcode',
                'bedroom_count', 'bathroom_count', 'parking_count', 'property_type')
@@ -141,6 +148,8 @@ def capture(args):
     store = SQLiteStore(args.db)
     budget, state = None, None
     browser = None
+    domain_browser = None
+    domain_profile = args.output / 'profiles' / 'domain-session'
     baseline_path = args.db.parent / 'metro-baseline.json'
     try:
         baseline = json.loads(baseline_path.read_text()) if baseline_path.exists() else {}
@@ -175,6 +184,12 @@ def capture(args):
         state['status'], state['exit_code'] = 'running', None
         # Failed queries are retried only on an explicit resume; successful pages are retained.
         state['errors'] = []
+        # Repair older checkpoints that rewound a parent because a child failed.
+        # Its successful partitions must survive the explicit resume.
+        for key, item in state['queries'].items():
+            if item['status'] == 'failed' and item.get('children') and unfinished_children(state, key):
+                item['status'] = 'split'
+                state['queue'] = [value for value in state['queue'] if value != key]
         for key, item in state['queries'].items():
             if item['status'] == 'failed' and key not in state['queue']:
                 state['queue'].append(key)
@@ -190,21 +205,32 @@ def capture(args):
             item = state['queries'][key]
             query = SearchQuery.from_dict(item['query'])
             item.pop('error', None)
+            reuse_domain = query.source == 'domain' and args.detail_limit == 0
+            if query.source != 'domain' and domain_browser:
+                domain_browser.close()
+                domain_browser = None
+                shutil.rmtree(domain_profile, ignore_errors=True)
             os.environ['PROXY_SESSION'] = uuid.uuid4().hex[:12]
+            geoip_address = None
             if query.source == 'realestate':
                 try:
-                    state['exit'] = verify_au_proxy('realestate', budget)
+                    verified_exit = verify_au_proxy('realestate', budget, include_ip=True)
+                    geoip_address = verified_exit.pop('ip', None)
+                    state['exit'] = verified_exit
                     state.setdefault('verified_sessions', {})[key] = {
                         **state['exit'], 'session_hash': hashlib.sha256(os.environ['PROXY_SESSION'].encode()).hexdigest()[:16]}
                 except Exception as error:
                     state['errors'].append({'source': 'realestate', 'stage': 'proxy_check', 'error': type(error).__name__})
                     break
             item['status'] = 'running'
-            profile = args.output / 'profiles' / (query.source + '-' + uuid.uuid4().hex)
+            profile = domain_profile if reuse_domain else args.output / 'profiles' / (query.source + '-' + uuid.uuid4().hex)
             try:
-                browser = BrowserManager(browser_type=BrowserType.PLAYWRIGHT,
-                    source=query.source, profile_dir=str(profile))
-                browser.create_driver()
+                if reuse_domain and domain_browser:
+                    browser = domain_browser
+                else:
+                    browser = BrowserManager(browser_type=BrowserType.PLAYWRIGHT,
+                        source=query.source, profile_dir=str(profile), geoip_address=geoip_address)
+                    browser.create_driver()
                 scraper = FACTORIES[query.source]()
                 while not budget.exhausted:
                     page = item['next_page']
@@ -351,11 +377,21 @@ def capture(args):
                                         'query': key, 'error': str(error)[:200]})
                 state['queue'].pop(0)
             finally:
-                if browser:
-                    browser.close()
+                if reuse_domain and item['status'] in {'done', 'split'} and not budget.exhausted:
+                    domain_browser = browser
                     browser = None
-                shutil.rmtree(profile, ignore_errors=True)
+                else:
+                    if browser:
+                        browser.close()
+                        browser = None
+                    if reuse_domain:
+                        domain_browser = None
+                    shutil.rmtree(profile, ignore_errors=True)
                 checkpoint(args, state, budget)
+        if domain_browser:
+            domain_browser.close()
+            domain_browser = None
+            shutil.rmtree(domain_profile, ignore_errors=True)
         if budget.exhausted:
             state['errors'].append({'stage': 'budget', 'error': 'Budget reached; checkpoint retained'})
         observed = set(tuple(value) for value in state['seen'].values())
@@ -377,7 +413,8 @@ def capture(args):
                 count = len(covered_ids(key))
                 state['coverage'].append({'query': key, 'expected': expected, 'unique': count})
                 if count < expected and item['status'] in {'done', 'split'}:
-                    item.update(status='failed', next_page=1, hashes=[])
+                    if not unfinished_children(state, key):
+                        item.update(status='failed', next_page=1, hashes=[])
                     state['errors'].append({'query': key, 'stage': 'coverage',
                                             'error': f'Root listing shortfall: {count} of {expected}'})
         # Real Estate list responses can supplement matching Domain records without another request.
@@ -414,6 +451,9 @@ def capture(args):
     finally:
         if browser:
             browser.close()
+        if domain_browser:
+            domain_browser.close()
+            shutil.rmtree(domain_profile, ignore_errors=True)
         if state is not None and budget is not None:
             checkpoint(args, state, budget)
         store.close()

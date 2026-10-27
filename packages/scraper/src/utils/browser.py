@@ -8,6 +8,8 @@ import logging
 import time
 import os
 import asyncio
+import json
+from urllib.parse import urlsplit
 from typing import Optional
 from contextlib import contextmanager
 from enum import Enum
@@ -44,12 +46,14 @@ class BrowserManager:
         config: Optional[SeleniumConfig] = None,
         browser_type: BrowserType = BrowserType.CHROME,
         profile_dir: Optional[str] = None,
-        source: str = "realestate"
+        source: str = "realestate",
+        geoip_address: Optional[str] = None,
     ):
         self.config = config or settings.selenium
         self.browser_type = browser_type
         self.profile_dir = profile_dir
         self.source = source
+        self.geoip_address = geoip_address
         self.driver = None
         self._temp_dir: Optional[str] = None
         # Playwright 相关
@@ -60,6 +64,8 @@ class BrowserManager:
         self._camoufox_manager = None
         self._navigation_status = None
         self.egress_proxy = None
+        self._search_payload = None
+        self._domain_home_ready = False
     
     def create_driver(self):
         """创建并配置浏览器"""
@@ -158,13 +164,13 @@ class BrowserManager:
             native_domain = (self.source == 'domain' and not proxy
                              and os.getenv('DOMAIN_NATIVE_NETWORK', '').lower() == 'true')
             engine = os.getenv(f'{self.source.upper()}_BROWSER_ENGINE', os.getenv('BROWSER_ENGINE', 'chromium')).strip().lower()
-            if engine not in {'camoufox', 'firefox', 'chromium'}:
+            if engine not in {'camoufox', 'firefox', 'chromium', 'patchright'}:
                 raise ValueError(f'Unsupported browser engine: {engine}')
             extra = {}
             executable = os.getenv('CHROMIUM_EXECUTABLE_PATH')
-            if executable and engine == 'chromium':
+            if executable and engine in {'chromium', 'patchright'}:
                 extra['executable_path'] = executable
-            elif engine == 'chromium' and os.getenv('CHROMIUM_CHANNEL'):
+            elif engine in {'chromium', 'patchright'} and os.getenv('CHROMIUM_CHANNEL'):
                 extra['channel'] = os.environ['CHROMIUM_CHANNEL']
             if proxy:
                 extra['proxy'] = proxy
@@ -174,9 +180,19 @@ class BrowserManager:
                 self._camoufox_manager = Camoufox(
                     persistent_context=True, user_data_dir=profile_path,
                     headless=use_headless, proxy=proxy,
-                    geoip=bool(proxy), enable_cache=True,
+                    geoip=(self.geoip_address or True) if proxy else False, enable_cache=True,
                     locale='en-AU', service_workers='allow' if native_domain else 'block')
                 self._playwright_context = self._camoufox_manager.__enter__()
+            elif engine == 'patchright':
+                from patchright.sync_api import sync_playwright as patched_playwright
+                self._playwright = patched_playwright().start()
+                if not executable and 'channel' not in extra:
+                    extra['channel'] = 'chrome'
+                # Keep the installed browser's own UA, language and window.
+                # Patchright's documented persistent Chrome setup avoids mixed fingerprints.
+                self._playwright_context = self._playwright.chromium.launch_persistent_context(
+                    profile_path, headless=use_headless, no_viewport=True,
+                    service_workers='allow' if native_domain else 'block', **extra)
             else:
                 self._playwright = sync_playwright().start()
                 launch = getattr(self._playwright, engine).launch_persistent_context
@@ -308,9 +324,14 @@ class BrowserManager:
             是否成功
         """
         try:
+            self._search_payload = None
             if self.browser_type == BrowserType.PLAYWRIGHT:
                 page = self.get_driver()
                 self._navigation_status = None
+                target = urlsplit(url)
+                if (self.source == 'domain' and os.getenv('DOMAIN_SEARCH_TRANSPORT') == 'json'
+                        and target.path.startswith('/rent/')):
+                    return self._fetch_domain_search(url)
                 # RealEstate.com.au 等站点可能持续加载资源导致 "load" 事件迟迟不触发，
                 # 使用 domcontentloaded 可显著降低 page.goto 超时概率。
                 response = page.goto(url, timeout=60000, wait_until="domcontentloaded")
@@ -335,6 +356,46 @@ class BrowserManager:
         except Exception as e:
             logger.error(f"Navigation failed: {url}, error: {e}")
             return False
+
+    def _fetch_domain_search(self, url):
+        """Use Domain's public GET search format in its own ordinary browser session."""
+        target = urlsplit(url)
+        if (target.scheme != 'https' or target.netloc != 'www.domain.com.au'
+                or not self.network_policy or self.network_policy.proxied
+                or os.getenv('DOMAIN_NATIVE_NETWORK', '').lower() != 'true'):
+            raise ValueError('Domain JSON search requires its ordinary native browser network')
+        if self.network_policy.budget.exhausted:
+            return False
+        page = self.get_driver()
+        if not self._domain_home_ready:
+            response = page.goto('https://www.domain.com.au/', wait_until='domcontentloaded', timeout=45000)
+            page.wait_for_timeout(3000)
+            if response is None or response.status >= 400 or urlsplit(page.url).netloc != 'www.domain.com.au':
+                self._navigation_status = response.status if response else 0
+                return False
+            self._domain_home_ready = True
+        result = page.evaluate('''async url => {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 45000);
+            try {
+                const response = await fetch(url, {headers:{Accept:'application/json'}, mode:'cors',
+                    credentials:'same-origin', cache:'no-cache', redirect:'follow', signal:controller.signal});
+                return {status:response.status, url:response.url, type:response.headers.get('content-type'),
+                        body:await response.text()};
+            } finally { clearTimeout(timer); }
+        }''', url)
+        self._navigation_status = result['status']
+        if (result['status'] != 200 or not (result.get('type') or '').startswith('application/json')
+                or urlsplit(result.get('url', '')).netloc != 'www.domain.com.au'):
+            logger.warning('Domain public JSON search returned HTTP %s', result['status'])
+            return False
+        payload = json.loads(result['body'])
+        if not isinstance(payload, dict) or not isinstance(payload.get('props'), dict):
+            raise ValueError('Domain public JSON response has no search props')
+        if self.network_policy.budget.exhausted:
+            return False
+        self._search_payload = payload
+        return True
     
     def wait_for_element(self, by: By, value: str, timeout: int = 10):
         """等待元素出现"""
@@ -409,9 +470,11 @@ class BrowserManager:
             driver = self.get_driver()
             driver.execute_script("arguments[0].click();", element)
     
-    def get_page_source(self) -> str:
+    def get_page_source(self) -> str | dict:
         """获取页面源码"""
         if self.browser_type == BrowserType.PLAYWRIGHT:
+            if self._search_payload is not None:
+                return self._search_payload
             return self._playwright_page.content()
         else:
             return self.get_driver().page_source

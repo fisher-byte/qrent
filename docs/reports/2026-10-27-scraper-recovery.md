@@ -2,9 +2,19 @@
 
 ## 当前结论
 
-服务器代码、专用 SSH、本机部署和两站采集已恢复。两城多区域试跑真实退出 0，取得 570 条，供应商实际扣量约 3.69 MB。首次整个都会区扫描仍在进行，不能把这个试跑称为全量验收；下面分别列出已验证结果与后续全量状态。
+服务器代码、专用 SSH 和本机部署已恢复。两城多区域试跑真实退出 0，取得 570 条，供应商实际扣量约 3.69 MB。放大后 Domain 出现持续 403，首次都会区扫描于 2026-10-28 05:22 实际退出 1，保存 32,987 条；仍属部分完成，不能把试跑称为全量验收。
 
 2026-10-28 00:23 启动 `metro-full-20261028`，独立 worker PID 4050859，300 MB 传输上限、18 小时超时。初期 Domain 首屏 403；后续使用原生 Firefox 网络完成独立验收并恢复直连采集。全量结束前不会建立有效基线，也不会报告全量成功。01:43 主动中断旧进程（真实退出 130）切换版本，保留 3,787 条 Real Estate / 163 个已存列表页；01:48 用 worker PID 4078332 从断点续跑，优先处理 Domain。开始前供应商余量为 849.32 MB（排序核验另消耗约 0.21 MB）。
+
+该次结果：Real Estate 悉尼 17,296 / 墨尔本 13,841，Domain 悉尼 1,850 / 墨尔本 0，累计 1,575 列表页、付费中继 225,812,855 bytes。Real Estate 描述、可入住日期、图片链接均完整，邮编缺失 0；仍有墨尔本失败价段与根覆盖缺口。Domain 在本机 Camoufox 和服务器原生 Firefox 放大后都失败，Lite AU/US 有界诊断也未解决。结果没有建立完整基线。
+
+## 开源指纹浏览器后续实验
+
+用户要求继续沿开源指纹浏览器方向。保留 [Camoufox](https://github.com/daijro/camoufox)（MPL-2.0），新增可选 [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright-python)（Apache-2.0），不购买浏览器服务。Patchright 使用其官方推荐的持久化、headful Chrome、no_viewport 配置，不拼接 UA 或自定义浏览器语言。浏览器工具宣传的检测成绩不作为 Domain 验收证据。
+
+本机 Patchright 1.64.3、已安装 Chrome、普通本地代理、首页预热后，悉尼和墨尔本各 2 页均为 200，80 条结构化 ID 与解析完全一致。服务器使用官网下载的 Chrome for Testing 156.0.8078.73：首页 200，首个悉尼列表导航 403，但同一浏览器内按公开前端的 `Accept: application/json` GET 原搜索 URL 返回 200；下一页及墨尔本两页导航均为 200。这些同时改变了驱动、Chrome 版本和预热，尚不能认定单个指纹字段是原因。
+
+服务器 JSON 样本真实包含 `props.listingsMap`、`listingSearchResultIds`、`totalListings`、`totalPages`、`currentPage` 和 `pageViewMetadata.searchRequest`；20 条全部解析、ID 一致、价格和邮编缺失 0。候选代码直接校验真实 JSON 的范围、筛选、排序和分页，不合成页面或元数据；仅 Domain 普通原生网络允许启用，403 与损坏响应仍失败。接下来必须通过主 runner 独立两城试验，再续跑原任务，不能把此样本视为全量成功。
 
 ## 仓库与部署
 
@@ -22,7 +32,7 @@
 
 - Domain 使用原生 Firefox 直连，保留正常 HTTP 缓存与资源加载；通过被动事件记录请求和字节，仅未代理模式允许启用。Real Estate 关键页面与验证请求走 AU 住宅代理。每个付费查询验证澳洲出口，并使用同一个已验证的黏性会话。
 - Real Estate 脚本和样式走无认证普通网络，图片、字体、视频不下载，保留图片链接；Domain 原生模式的资源使用普通网络。普通请求失败不会转付费补拉。
-- Real Estate 的公开脚本/样式增加单浏览器内存缓存（32 MB / 128 项 / 单项 4 MB / TTL 最多 300 秒），尊重缓存禁令、重取、Cookie 与 Vary；命中仍检查预算，另记 cache_hits / cache_saved_body_bytes。实际全量提速待日志测量。
+- Real Estate 的公开脚本/样式增加单浏览器内存缓存（32 MB / 128 项 / 单项 4 MB / TTL 最多 300 秒），尊重缓存禁令、重取、Cookie 与 Vary；命中仍检查预算，另记 cache_hits / cache_saved_body_bytes。服务器两页 50 条对照记录付费中继 360,370 bytes、59 次命中，避免重复的解码响应体 7,684,588 bytes；第二页 9.93 秒，旧样本中位 36.79 秒。解码响应体不是准确账单字节。
 - loopback HTTP/CONNECT 出口也统计浏览器后台连接，仅房源目标和小型 IP 校验走付费。过滤规则、更新、视频组件走普通网络。`proxy_wire_bytes` 与页面计数分别记录，预算同时约束两项，供应商读数另行核对。
 - Domain 详情复用同一次列表浏览器，修复切换浏览器指纹后出现的 403。Real Estate 的 `Vic` 等州名统一转大写后校验。
 - Real Estate 列表内嵌数据已有完整描述、可入住日期、图片链接与位置，通常无需额外详情请求。两站保留各自 ID 和链接，同地址含房号、价格、卧室相同的近期完整信息可复用，隐藏地址不跨站匹配。
@@ -91,6 +101,8 @@ Domain 使用官方 Sydney Region NSW / Melbourne Region VIC 搜索。Real Estat
 2026-10-28 00:18:48 已把 `/root/qrent-scraper/run_scraper.sh` 切换为 `ops/run_metro.sh`，保留每日 **02:00 Asia/Beijing** cron。入口语法通过，实际持锁运行返回 **75**，证明另一个采集在跑时不会重叠。每日最长 18 小时，付费传输记录上限 300 MB；首次全量运行时若碰到 02:00 任务，后者会因锁跳过。
 
 **03:00** 在线备份使用 SQLite backup API 包含 WAL 已提交数据，**03:10** 只清理备份根目录 30 天前普通 `.db`，回滚子目录不受影响。crond 已确认 active。
+
+10 月 28 日真实 cron 已在主任务持锁时退出 75；03:00 备份已实际生成 66,482,176 bytes 的 `properties_20261028.db`，日志记录路径，未依赖手动触发。
 
 - 首次恢复备份：`/root/qrent-scraper/backup/pre-recovery-20261027`。
 - 出口修复备份：`/root/qrent-scraper/backup/pre-egress-20261027_220341`。

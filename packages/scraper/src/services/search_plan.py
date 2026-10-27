@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 from bs4 import BeautifulSoup
-from ..utils.embedded import realestate_search, residential_listings
+from ..utils.embedded import domain_search, realestate_search, residential_listings
 
 
 class SearchMetadataError(RuntimeError):
@@ -82,11 +82,10 @@ class SearchSnapshot:
 
 
 def read_snapshot(source, html, query, page=1):
-    soup = BeautifulSoup(html, 'html.parser')
     try:
+        soup = html if isinstance(html, dict) else BeautifulSoup(html, 'html.parser')
         if source == 'domain':
-            tag = soup.find('script', id='__NEXT_DATA__')
-            data = json.loads(tag.string)['props']['pageProps']['componentProps']
+            data = domain_search(soup)
             request = data['pageViewMetadata']['searchRequest']
             ordering = request.get('sort') or {}
             if ordering.get('sortKey') != 'DateUpdated' or ordering.get('direction') != 'Descending':

@@ -22,6 +22,20 @@ def listing(source=PropertySource.DOMAIN, house_id="123", **changes):
 
 
 class AddressTests(unittest.TestCase):
+    def test_domain_public_json_keeps_listing_identity_unit_price_and_features(self):
+        document = {'props': {'listingSearchResultIds': [123], 'listingsMap': {'123': {'listingModel': {
+            'url': '/2-10-example-street-melbourne-vic-3000-123', 'price': '$600 per week',
+            'address': {'street': '2/10 Example Street', 'suburb': 'Melbourne', 'state': 'VIC', 'postcode': '3000'},
+            'features': {'beds': 2, 'baths': 1, 'parking': 1, 'propertyTypeFormatted': 'Apartment'},
+            'images': ['https://rimh2.domainstatic.com.au/example.jpg']}}}}}
+        props = DomainScraper().parse_listing_page(document)
+        self.assertEqual(len(props), 1)
+        prop = props[0]
+        self.assertEqual((prop.house_id, prop.address_line1, prop.state, prop.postcode),
+                         ('123', '2/10 Example Street', 'VIC', '3000'))
+        self.assertEqual((prop.price_per_week, prop.bedroom_count, prop.bathroom_count), (600, 2, 1))
+        self.assertTrue(prop.url.startswith('https://www.domain.com.au/'))
+
     def test_realestate_postcode_comes_from_listing_metadata(self):
         prop = listing(PropertySource.REALESTATE, suburb="Carlton", postcode="")
         soup = BeautifulSoup('''<script type="application/ld+json">[{"@type":"Event",

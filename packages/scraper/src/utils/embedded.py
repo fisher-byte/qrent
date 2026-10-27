@@ -3,6 +3,10 @@ import json
 
 
 def domain_search(soup):
+    if isinstance(soup, dict):
+        # Public search refetch responses contain componentProps directly in props.
+        data = soup.get('props')
+        return data if isinstance(data, dict) else {}
     tag = soup.find('script', id='__NEXT_DATA__')
     try:
         return json.loads(tag.string)['props']['pageProps']['componentProps'] if tag else {}

@@ -100,3 +100,18 @@
 - 正式入口已于 00:18:48 切换至 `ops/run_metro.sh`，原 cron 保留，实际持锁测试退出 75。新增州名/排序和增量回归后，本机与服务器 54 项测试通过，独立复核允许全量试验。
 - 01:45 已部署 8255ed8，73 项本机/服务器测试通过；Domain 原生网络独立候选取得两城各 60 条、2 实际详情、错误 0、退出 0、付费字节 0。新增有界公开静态缓存和原生网络被动计数。
 - 01:43 为切换版本主动 SIGINT，实际退出 130，保留 3,787 条 REA / 163 页断点；01:48 以 PID 4078332 续跑，优先 Domain。同期供应商余量 823.69 MB，无新增购买。
+
+## Task 7: 大规模 Domain 的普通网络补采
+
+- [x] 实际放大后发现：Domain 原生小样本成功，服务器连续约 1,850 条后多个价段和墨尔本返回 403；Lite AU/US 有界验证也未解决，不追加购买。正常 Residential 公开最小套餐超过本轮预算。
+- [x] 02:27 启动本机普通网络 Domain-only 全量，PID 25099 / child 25100；独立 SQLite 和断点，付费来源显式只保留 Real Estate，Domain 代理计数为 0。服务器继续采集 Real Estate。
+- [ ] 验证本机两城完整查询树、真实进程退出码和字段后，安全导入服务器；来源和目标均须通过范围指纹、覆盖、真实结束状态和锁检查，在线备份后 upsert。
+- [ ] 导入仅准备 Domain 检查点，仍由主 runner 显式续跑复核、导出并建立基线；不得凭导入或局部样本标记全量成功。
+
+## Task 8: 开源指纹浏览器与公开搜索 JSON
+
+- [x] 用户明确要求沿开源指纹浏览器方向继续；比较 Camoufox、Patchright、CloakBrowser，选 Apache-2.0 Patchright 作独立对照，不购买浏览器服务。
+- [x] 本机 Patchright + 已安装 Chrome、普通网络、首页预热，两城各 2 页均 200，80 条真实结构化 ID 与解析一致。服务器官方 Chrome for Testing 156.0.8078.73 + Patchright：首个列表导航 403，但同会话公开 JSON GET 返回 200；其余 3 列表导航为 200。
+- [x] JSON 实际含 props.listingsMap / listingSearchResultIds / totalListings / pageViewMetadata.searchRequest；服务端样本 20 条全部解析且 ID 一致。新增可选真实 JSON 输入、原有元数据校验、单会话复用与旧失败父节点修复，不以页面 200 代替完整覆盖。
+- [x] Real Estate 复用刚验证的 AU 出口 IP 给 Camoufox，避免第二次 geoip 自动查 IP 超时；原始 IP 不写结果报告。
+- [ ] 部署后跑独立两城 Domain JSON 试验，核验实际退出、零付费与覆盖；通过后显式续跑主全量并复核剩余 Real Estate 失败价段。

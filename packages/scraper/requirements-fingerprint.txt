@@ -1,2 +1,3 @@
 -r requirements.txt
 camoufox[geoip]==0.5.8
+patchright==1.64.3

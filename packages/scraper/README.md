@@ -66,6 +66,12 @@ BROWSER_ENGINE=camoufox .venv/bin/python recovery_runner.py \
 服务器启动模板是 `ops/run_recovery.sh`：带独占锁、2 小时超时、每次约 30 MB 代理传输上限及正确退出码。原目录的每日 02:00 cron 可继续调用 `/root/qrent-scraper/run_scraper.sh`。`ops/backup_sqlite.py` 使用 SQLite 在线备份接口，能包含 WAL 中已经提交的记录。
 
 验证采集模块：`python -m unittest discover -s tests -v`。
+
+Domain 的可选开源驱动是 [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright-python)（Apache-2.0）。安装 `requirements-fingerprint.txt` 后设置 `DOMAIN_BROWSER_ENGINE=patchright`，使用已安装 Chrome 或 `CHROMIUM_EXECUTABLE_PATH`。遵循项目推荐的持久化、headful、`no_viewport` 配置，保留真实浏览器的 UA、语言和窗口；生产是否通过另看恢复报告。Real Estate 继续使用 [Camoufox](https://github.com/daijro/camoufox)（MPL-2.0）。
+
+`DOMAIN_NATIVE_NETWORK=true` 且 Domain 没有付费代理时，可设置 `DOMAIN_SEARCH_TRANSPORT=json`：先打开公开首页，在同一个浏览器会话里 GET 原搜索 URL，使用网站前端自身的 `Accept: application/json` 格式。直接校验真实返回的 `props` 中的地区、筛选、排序、分页和房源 ID，再解析 `listingsMap`；不合成 HTML 或搜索元数据。403、空响应和覆盖不足仍失败，详情页继续正常导航。默认 `navigation` 保留页面方式。都会区列表采集会跨价段复用 Domain 浏览器，失败续跑保留已完成叶查询，避免重新抓取整个分区树。
+
+异机补采只有在 Domain-only 全量和实际进程均成功、付费计数为零时，才能用 `ops/import_domain_capture.py` 校验导入。默认 dry-run，`--apply` 取得主任务锁后备份、upsert，并保持目标 partial；主 runner 仍须显式续跑核验，才能建立完整基线。
 代理会话设计参考取回的 Qrent 服务器 LycheeIP/gost 代码，当前连接来自 FlashProxy Residential Lite；千问配置私下复用本机 `pdftomd` 项目的 DashScope 密钥。不在仓库中保存凭据。
 
 ## 🌟 Features

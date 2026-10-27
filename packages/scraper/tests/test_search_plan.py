@@ -19,6 +19,20 @@ def domain_html(total=13182, pages=50, **request):
 
 
 class SearchPlanTests(unittest.TestCase):
+    def test_domain_public_json_preserves_scope_ordering_and_ids_validation(self):
+        html = domain_html(total=2, pages=1)
+        component = json.loads(html.split('>', 1)[1].split('</script>')[0])['props']['pageProps']['componentProps']
+        document = {'props': component}
+        snapshot = read_snapshot('domain', document, SearchQuery('domain', 'sydney'))
+        self.assertEqual((snapshot.total, snapshot.result_ids), (2, frozenset({'0', '1'})))
+        with self.assertRaises(SearchMetadataError):
+            read_snapshot('domain', document, SearchQuery('domain', 'melbourne'))
+        with self.assertRaises(SearchMetadataError):
+            read_snapshot('domain', document, SearchQuery('domain', 'sydney', low=0, high=750))
+        component['pageViewMetadata']['searchRequest']['sort']['sortKey'] = 'Default'
+        with self.assertRaises(SearchMetadataError):
+            read_snapshot('domain', document, SearchQuery('domain', 'sydney'))
+
     def test_domain_rejects_ignored_newest_sort_before_incremental_early_stop(self):
         for sort in (None, {'sortKey': 'Default', 'direction': 'Descending'},
                      {'sortKey': 'DateUpdated', 'direction': 'Ascending'}):

@@ -1,6 +1,7 @@
 import sys
 import unittest
 import os
+import json
 import socket
 import tempfile
 from pathlib import Path
@@ -22,6 +23,77 @@ class Page:
 
 
 class BrowserTests(unittest.TestCase):
+    def test_direct_domain_json_search_uses_one_homepage_and_rejects_failed_payloads(self):
+        url = 'https://www.domain.com.au/rent/sydney-region-nsw/?page=1'
+        page = MagicMock()
+        page.goto.return_value.status = 200
+        page.url = 'https://www.domain.com.au/'
+        payload = {'props': {'listingSearchResultIds': [123]}}
+        response = {'status': 200, 'url': url, 'type': 'application/json; charset=utf-8', 'body': json.dumps(payload)}
+        page.evaluate.return_value = response
+        browser = BrowserManager(browser_type=BrowserType.PLAYWRIGHT, source='domain')
+        browser._playwright_page = page
+        browser.network_policy = MagicMock(proxied=False)
+        browser.network_policy.budget.exhausted = False
+        with patch.dict(os.environ, {'DOMAIN_SEARCH_TRANSPORT': 'json', 'DOMAIN_NATIVE_NETWORK': 'true'}):
+            self.assertTrue(browser.navigate(url, wait_time=0))
+            self.assertEqual(browser.get_page_source(), payload)
+            self.assertTrue(browser.navigate(url, wait_time=0))
+            page.goto.assert_called_once()
+            page.evaluate.return_value = {**response, 'status': 403}
+            self.assertFalse(browser.navigate(url, wait_time=0))
+            self.assertIsNone(browser._search_payload)
+            page.evaluate.return_value = {**response, 'body': '{bad-json'}
+            self.assertFalse(browser.navigate(url, wait_time=0))
+            browser.network_policy.proxied = True
+            before = page.evaluate.call_count
+            self.assertFalse(browser.navigate(url, wait_time=0))
+            self.assertEqual(page.evaluate.call_count, before)
+
+    def test_patchright_domain_preserves_native_fingerprint_and_direct_network(self):
+        context, runtime, launcher = MagicMock(), MagicMock(), MagicMock()
+        context.pages = [MagicMock()]
+        runtime.chromium.launch_persistent_context.return_value = context
+        launcher.return_value.start.return_value = runtime
+        api = MagicMock(sync_playwright=launcher)
+        with tempfile.TemporaryDirectory() as profile, patch.dict(os.environ, {
+            'BROWSER_ENGINE': 'camoufox', 'DOMAIN_BROWSER_ENGINE': 'patchright',
+            'PROXY_SOURCES': 'realestate', 'DOMAIN_NATIVE_NETWORK': 'true', 'HEADLESS': 'false'}, clear=True), \
+                patch.dict(sys.modules, {'patchright': MagicMock(), 'patchright.sync_api': api}), \
+                patch('camoufox.sync_api.Camoufox') as camoufox, \
+                patch('src.utils.browser.time.sleep'):
+            browser = BrowserManager(browser_type=BrowserType.PLAYWRIGHT, profile_dir=profile, source='domain')
+            try:
+                browser.create_driver()
+                config = runtime.chromium.launch_persistent_context.call_args.kwargs
+                self.assertTrue(config['no_viewport'])
+                self.assertFalse(config['headless'])
+                self.assertEqual(config['channel'], 'chrome')
+                self.assertFalse({'viewport', 'locale', 'user_agent', 'extra_http_headers'} & config.keys())
+                context.route.assert_not_called()
+                self.assertFalse(browser.network_policy.proxied)
+                camoufox.assert_not_called()
+            finally:
+                browser.close()
+
+    def test_camoufox_reuses_the_verified_exit_without_another_ip_lookup(self):
+        context = MagicMock()
+        context.pages = [MagicMock()]
+        with tempfile.TemporaryDirectory() as profile, patch.dict(os.environ, {
+            'BROWSER_ENGINE': 'camoufox'}, clear=True), \
+                patch('src.utils.browser.ProxyPool.config', return_value={'server': 'http://127.0.0.1:9'}), \
+                patch('src.utils.browser.EgressProxy'), \
+                patch('camoufox.sync_api.Camoufox') as camoufox, \
+                patch('src.utils.browser.time.sleep'):
+            camoufox.return_value.__enter__.return_value = context
+            browser = BrowserManager(browser_type=BrowserType.PLAYWRIGHT, profile_dir=profile,
+                                     source='realestate', geoip_address='203.0.113.7')
+            try:
+                browser.create_driver()
+                self.assertEqual(camoufox.call_args.kwargs['geoip'], '203.0.113.7')
+            finally:
+                browser.close()
+
     def test_domain_can_use_stock_firefox_without_changing_realestate_engine(self):
         context, playwright = MagicMock(), MagicMock()
         context.pages = [MagicMock()]

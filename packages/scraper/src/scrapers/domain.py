@@ -169,10 +169,11 @@ class DomainScraper(BaseScraper):
         
         return False
     
-    def parse_listing_page(self, html: str) -> List[PropertyData]:
-        """解析 Domain 列表页面"""
-        soup = BeautifulSoup(html, "html.parser")
-        listings = soup.find_all("li", {"data-testid": lambda v: v and v.startswith("listing-")})
+    def parse_listing_page(self, html: str | dict) -> List[PropertyData]:
+        """Parse rendered cards or the site's public search refetch response."""
+        soup = html if isinstance(html, dict) else BeautifulSoup(html, "html.parser")
+        listings = [] if isinstance(soup, dict) else soup.find_all(
+            "li", {"data-testid": lambda v: v and v.startswith("listing-")})
         
         properties = []
         for listing in listings:
