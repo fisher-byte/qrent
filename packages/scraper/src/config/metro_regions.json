@@ -1,0 +1,201 @@
+{
+  "source": "https://suggest.realestate.com.au/consumer-suggest/suggestions",
+  "verified_date": "2026-10-27",
+  "scope_note": "Real Estate metro regional groupings include some bordering markets; Domain uses Sydney Region NSW and Melbourne Region VIC. Results retain their source and exact suburb/postcode.",
+  "cities": {
+    "sydney": [
+      {
+        "name": "Sydney CBD",
+        "state": "NSW",
+        "atlas_id": "6102b706-7216-4cde-b780-45cba0514ac5"
+      },
+      {
+        "name": "Western Sydney",
+        "state": "NSW",
+        "atlas_id": "637c2a12-9141-4e1d-adfa-30bd200a49a4"
+      },
+      {
+        "name": "South Western Sydney",
+        "state": "NSW",
+        "atlas_id": "0eadb86e-6345-43b6-ab6d-18e17c779817"
+      },
+      {
+        "name": "Eastern Suburbs",
+        "state": "NSW",
+        "atlas_id": "1dc4e39e-4c38-4521-a01d-c9fa2965f62a"
+      },
+      {
+        "name": "Inner West",
+        "state": "NSW",
+        "atlas_id": "1fd829b8-ac54-41b1-afd4-fc55e06977a2"
+      },
+      {
+        "name": "Parramatta - Greater Region",
+        "state": "NSW",
+        "atlas_id": "da9e8f17-4d5d-4017-a5ed-5b9be9d445c8"
+      },
+      {
+        "name": "Upper North Shore",
+        "state": "NSW",
+        "atlas_id": "8c7ed42f-3aa3-480e-8b0e-ff52f0c2ac4d"
+      },
+      {
+        "name": "St George",
+        "state": "NSW",
+        "atlas_id": "e5b8d2ac-3bb5-4b37-8fc7-7ff9f6f83e9d"
+      },
+      {
+        "name": "Liverpool - Greater Region",
+        "state": "NSW",
+        "atlas_id": "77773365-1de6-4ac0-8f1c-6430603bbc26"
+      },
+      {
+        "name": "Macarthur Region",
+        "state": "NSW",
+        "atlas_id": "894e9345-8ec9-4acf-b0aa-0b23431a4e0c"
+      },
+      {
+        "name": "Canterbury-Bankstown",
+        "state": "NSW",
+        "atlas_id": "abb145e8-496b-4dc8-8491-6977f7fb632a"
+      },
+      {
+        "name": "Lower North Shore",
+        "state": "NSW",
+        "atlas_id": "3bd3328a-b5cc-43a3-83cd-3b678e650219"
+      },
+      {
+        "name": "Northern Beaches",
+        "state": "NSW",
+        "atlas_id": "ff03c5af-a84b-435e-a428-0342320c9cac"
+      },
+      {
+        "name": "Sutherland Shire",
+        "state": "NSW",
+        "atlas_id": "c106fcc5-3690-42f8-b245-9c4fc34a5965"
+      },
+      {
+        "name": "The Hills",
+        "state": "NSW",
+        "atlas_id": "e5ff3307-2987-403a-9e75-74a56aed1ac3"
+      },
+      {
+        "name": "Penrith - Greater Region",
+        "state": "NSW",
+        "atlas_id": "943880e2-e02c-4722-90a6-c435472dd03b"
+      },
+      {
+        "name": "Blue Mountains - Region",
+        "state": "NSW",
+        "atlas_id": "57b80746-a721-4e33-84b7-73849fdf1967"
+      },
+      {
+        "name": "Hawkesbury Region",
+        "state": "NSW",
+        "atlas_id": "8c19af17-7edc-48c5-977c-08027c706aaa"
+      },
+      {
+        "name": "Pittwater",
+        "state": "NSW",
+        "atlas_id": "20cdf9f3-ec57-4e1f-9e5c-3bccb2052891"
+      }
+    ],
+    "melbourne": [
+      {
+        "name": "Melbourne - Northern Region",
+        "state": "VIC",
+        "atlas_id": "ef258a2b-08eb-42ab-8f57-f74e5f5646cf"
+      },
+      {
+        "name": "Melbourne City - Greater Region",
+        "state": "VIC",
+        "atlas_id": "0dd9fcec-2f48-422f-ae81-f6903cc25081"
+      },
+      {
+        "name": "Inner East Melbourne",
+        "state": "VIC",
+        "atlas_id": "331bb74a-9779-4f52-934f-6370ddaca80c"
+      },
+      {
+        "name": "Eastern Melbourne",
+        "state": "VIC",
+        "atlas_id": "c3765fc0-31ec-4bfc-b536-27a6609fd14e"
+      },
+      {
+        "name": "South East Melbourne",
+        "state": "VIC",
+        "atlas_id": "c7b71a8a-fe58-412a-b23c-abe2a6fddb92"
+      },
+      {
+        "name": "South West Melbourne",
+        "state": "VIC",
+        "atlas_id": "37e64dd8-7b09-466a-a22c-bea5e5f5c3b5"
+      },
+      {
+        "name": "Western Melbourne",
+        "state": "VIC",
+        "atlas_id": "6e2156c0-c5cc-4312-94d7-fe9171e9348d"
+      },
+      {
+        "name": "North West Melbourne",
+        "state": "VIC",
+        "atlas_id": "3deb4aca-af31-4e92-8189-c1a3954bc134"
+      },
+      {
+        "name": "Bayside",
+        "state": "VIC",
+        "atlas_id": "fac22833-a5fa-4ebc-bcb1-f4e422eada0d"
+      },
+      {
+        "name": "Mornington Peninsula",
+        "state": "VIC",
+        "atlas_id": "b269459e-ed62-4376-b141-9bd39582b840"
+      },
+      {
+        "name": "Yarra Valley",
+        "state": "VIC",
+        "atlas_id": "b1f8a5ab-1926-4199-8e99-067487fbcc8f"
+      },
+      {
+        "name": "Melton - Greater Region",
+        "state": "VIC",
+        "atlas_id": "cbf4f384-b292-42b1-8421-757ec0ba5ef7"
+      },
+      {
+        "name": "Knox City - Region",
+        "state": "VIC",
+        "atlas_id": "70e7b0dc-ae01-4ef8-b989-399219947311"
+      },
+      {
+        "name": "Dandenong Ranges",
+        "state": "VIC",
+        "atlas_id": "b0fb3eb6-67ea-419c-b5e5-ae4e93230178"
+      },
+      {
+        "name": "Healesville - Greater Region",
+        "state": "VIC",
+        "atlas_id": "33f771d9-d7b7-4221-b256-a4f90d2348bb"
+      },
+      {
+        "name": "Koo Wee Rup Region",
+        "state": "VIC",
+        "atlas_id": "1f7cd77c-121c-4fa2-a966-b3ae612809e9"
+      },
+      {
+        "name": "Macedon Ranges Shire",
+        "state": "VIC",
+        "atlas_id": "2121f99c-4351-4da7-a559-9beaa14c0a0f"
+      },
+      {
+        "name": "Broadford and Mitchell Shire",
+        "state": "VIC",
+        "atlas_id": "d102dc9c-c93a-4757-9558-75ac8f6a7f75"
+      },
+      {
+        "name": "Bacchus Marsh and Moorabool Shire",
+        "state": "VIC",
+        "atlas_id": "9b61a7f0-103a-4b92-9adc-ed21ccedb371"
+      }
+    ]
+  }
+}

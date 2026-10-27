@@ -57,6 +57,7 @@ class ScraperConfig:
     request_delay: float = 3.0  # Request interval (seconds)
     retry_count: int = 3
     retry_delay: float = 10.0
+    retain_browser: bool = False  # Keep list cookies and fingerprint for detail navigation.
 
 
 @dataclass

@@ -11,6 +11,8 @@
 
 English | [简体中文](./README_CN.md)
 
+This fork maintains the 2026 scraper recovery and metro capture work. See the [scraper runbook](./packages/scraper/README.md) for local checks, SSH deployment, Domain direct access, and budgeted Australian proxy routing. GitHub Actions are disabled in this fork; the original application documentation remains below.
+
 ## About QRent
 
 QRent is an AI-powered rental platform built for students in Australia. It helps students find housing smarter and faster by analyzing commute time, budget, and area data to recommend the most suitable rentals — all in one place.

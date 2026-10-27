@@ -133,8 +133,7 @@ def parse_available_date(date_text: str) -> Optional[datetime]:
     if "Available Now" in date_text or "now" in date_text.lower():
         return datetime.now()
     
-    if "Available from" in date_text:
-        date_text = date_text.replace("Available from", "").strip()
+    date_text = re.sub(r'^available(?:\s+from)?\s*', '', date_text, flags=re.I).strip()
     
     try:
         # 移除序数后缀 (1st, 2nd, 3rd, 4th, etc.)
@@ -144,6 +143,7 @@ def parse_available_date(date_text: str) -> Optional[datetime]:
         formats = [
             "%A, %d %B %Y",  # Monday, 15 January 2024
             "%d %B %Y",     # 15 January 2024
+            "%d %b %Y",     # 18 Nov 2026
             "%d/%m/%Y",     # 15/01/2024
             "%Y-%m-%d",     # 2024-01-15
         ]

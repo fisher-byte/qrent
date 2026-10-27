@@ -24,6 +24,7 @@ rea_scraper.log
 *.csv
 *.xml
 *.json
+!src/config/metro_regions.json
 *.sql
 data/
 

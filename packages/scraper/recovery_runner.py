@@ -135,7 +135,7 @@ def capture(args, factories=None):
                     item["attempts"] += 1
                     if attempt:
                         os.environ["PROXY_SESSION"] = uuid.uuid4().hex[:12]
-                    scraper = factories[source](config=ScraperConfig(max_pages=args.pages),
+                    scraper = factories[source](config=ScraperConfig(max_pages=args.pages, retain_browser=True),
                         profile_dir=str(args.output / "profiles" / f"{source}-{os.environ['PROXY_SESSION']}"))
                     try:
                         props = scraper.scrape_area(area)

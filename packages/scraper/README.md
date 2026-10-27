@@ -2,6 +2,37 @@
 
 A production-ready, modular property scraping framework for Australian rental market, specifically designed for university student accommodation near UNSW, USYD, and UTS.
 
+## Fork 与都会区采集
+
+当前恢复工作维护在 `fisher-byte/qrent`。后端仍在 `packages/backend`；两站爬虫分别在 `src/scrapers/realestate.py` 和 `src/scrapers/domain.py`。
+这个 fork 不依赖原仓库的 CI/CD；GitHub Actions 已禁用。本机通过已有 SSH 别名 `qrent-prod` 部署、检查进程和下载结果，密钥不进入仓库。
+
+从仓库根目录执行：
+
+```bash
+# 本地检查、按哈希打包、SSH 上传、服务器加锁备份、测试失败回滚。
+.venv/bin/python packages/scraper/ops/deploy_recovery.py
+
+# 两城、两站、多大区各最多 3 页；包括 Domain 的直连详情验收。
+.venv/bin/python packages/scraper/ops/remote_capture.py start \
+  --campaign metro-pilot-20261027 --mode pilot --proxy-bytes 10000000 --detail-limit 4
+.venv/bin/python packages/scraper/ops/remote_capture.py status --campaign metro-pilot-20261027
+
+# 试跑验收后启动全量。指定的 300 MB 是本次传输记录上限，不是账单承诺。
+.venv/bin/python packages/scraper/ops/remote_capture.py start \
+  --campaign metro-full-20261027 --mode full --proxy-bytes 300000000 \
+  --detail-limit 0 --timeout 64800
+```
+
+- `metro_runner.py` 用 Domain 的 Sydney Region / Melbourne Region，以及 `src/config/metro_regions.json` 中的 Real Estate 区域组覆盖都会区。Real Estate 的部分区域组包含相邻边缘市场；每条结果保留原站点 ID、州、邮编与链接。
+- 旧 `sydney - greater region` 搜索会被 Real Estate 解析成 CBD。新流程校验官方位置 ID，拒绝悄悄缩小范围。
+- Domain 的结果窗口最多 50 页、Real Estate 最多 80 页。超过窗口时递归分价段并按来源 ID 去重；检查每页结构化搜索 ID、叶查询与根查询的唯一总量，缺失时保留断点并返回非零。
+- Real Estate 列表内嵌数据提供描述、可入住日期、图片链接和位置，通常不需要再打开详情页。图片文件不下载；Domain 可复用同址、同价、同卧室的完整信息，隐藏地址不参与跨站匹配。
+- `state.json` 是私有续跑断点，`result.json` 是范围、质量、错误、流量报告；同时输出两站按城市分开的 `.csv.gz`。后台进程状态另写 `process-status.json`，不能仅凭结果文件推断进程结束。
+- `remote_capture.py start --resume` 只在旧进程确已终止后续跑。断点绑定区域配置、规划版本和根查询集合，范围改变时拒绝沿用。
+- `ops/run_metro.sh` 供现有每日 02:00 任务调用；`auto` 在缺少有效全量基线或基线超过 7 天时全量刷新，其他日期做增量采集。未完成全量不建立基线；未扫描和失败的数据不自动下架。
+- 本轮代理累计购买上限为 USD 1.50，包含已购买的 USD 0.30 一次性额度，无自动续费。所有传输统计必须同时对照供应商实际扣量；最终数字见恢复报告。
+
 ## 2026-10-27 恢复运行入口
 
 腾讯云现有独立部署位于 `/root/qrent-scraper`，使用 SQLite；它与根目录 Docker Compose 的 MySQL 后端是两条数据路径。
@@ -28,7 +59,7 @@ BROWSER_ENGINE=camoufox .venv/bin/python recovery_runner.py \
 - 浏览器的 loopback HTTP/CONNECT 出口把后台更新、过滤规则和视频组件连接也分到普通网络；`proxy_wire_bytes`、`direct_wire_bytes`、`wire_hosts` 包含这些连接的传输记录。页面拦截统计不等于供应商扣量，配额同时检查页面与中继两项代理计数。
 - 按运行生成 CSV 和 `*_result.json`；`success` 退出 0，空结果、详情失败或部分扫描退出非零。临时浏览器配置运行后自动清理；诊断时可用 `--keep-profiles` 保留。
 - 千问模型通过 `QWEN_MODEL` 配置，默认 `qwen-plus`；支持 `DASHSCOPE_API_KEY`、`PROPERTY_RATING_API_KEY`、`QWEN_API_KEY`。评分通过 `--score --score-limit 5` 显式启用。
-- 腾讯云真实验收：Domain 直连两地各 20 条，Real Estate + FlashProxy AU 两地各 25 条，共 90 条写入原数据库；4 条详情和 1 条千问评分成功，退出 0。完整证据及部署状态见 [恢复报告](../../docs/reports/2026-10-27-scraper-recovery.md)。
+- 服务器的列表、详情、原库写入和模型评分验收分别留有记录；真实退出码、版本与完成范围见 [恢复报告](../../docs/reports/2026-10-27-scraper-recovery.md)。
 
 服务器启动模板是 `ops/run_recovery.sh`：带独占锁、2 小时超时、每次约 30 MB 代理传输上限及正确退出码。原目录的每日 02:00 cron 可继续调用 `/root/qrent-scraper/run_scraper.sh`。`ops/backup_sqlite.py` 使用 SQLite 在线备份接口，能包含 WAL 中已经提交的记录。
 

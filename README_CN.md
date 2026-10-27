@@ -10,6 +10,8 @@
 
 [English](./README.md) | 简体中文
 
+本 fork 维护 2026 年爬虫恢复及悉尼、墨尔本都会区采集。当前操作入口见[爬虫说明](./packages/scraper/README.md)：本地检查、SSH 部署、Domain 直连、Real Estate 付费代理分流。fork 的 GitHub Actions 已禁用；下方保留原应用说明。
+
 ## 关于 QRent
 
 QRent 是一个专为澳大利亚国际学生打造的 AI 驱动租房平台。通过分析通勤时间、预算和区域数据，帮助学生更智能、更快速地找到最合适的租房——一站式完成。

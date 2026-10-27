@@ -32,6 +32,7 @@ from ..utils import (
     parse_available_date, is_valid_image_url, generate_house_id
 )
 from ..utils.browser import BrowserManager, BrowserType
+from ..utils.embedded import realestate_search, residential_listings
 
 # 加载环境变量
 load_dotenv('.env')
@@ -303,7 +304,60 @@ class RealEstateScraper(BaseScraper):
                 logger.debug(f"解析房源失败: {e}")
         
         self._complete_locations(properties, soup)
+        self._complete_embedded(properties, soup)
         return properties
+
+    def _complete_embedded(self, properties, soup):
+        """The public list response already contains most detail fields."""
+        search = realestate_search(soup)
+        if not search:
+            return
+        items = list(residential_listings(search.get('results', {})))
+        expected = {str(item['id']) for item in items}
+        properties[:] = [prop for prop in properties if prop.house_id in expected]
+        by_id = {prop.house_id: prop for prop in properties}
+        # Exclude showcase advertisements outside the actual search result set.
+        for item in items:
+            house_id = str(item['id'])
+            address = item.get('address') or {}
+            short_address = (address.get('display') or {}).get('shortAddress')
+            links = item.get('_links') or {}
+            url = ((links.get('canonical') or links.get('trackedCanonical') or {}).get('href') or '').split('?')[0]
+            if house_id not in by_id:
+                if not url.startswith(self.BASE_URL + '/property-'):
+                    continue
+                features = item.get('generalFeatures') or {}
+                type_info = item.get('propertyType') or {}
+                prop = PropertyData(house_id=house_id, source=self.SOURCE,
+                    price_per_week=extract_price((item.get('price') or {}).get('display', '')),
+                    address_line1=short_address or 'Address withheld', suburb=address.get('suburb') or '',
+                    state=address.get('state') or '', postcode=str(address.get('postcode') or ''),
+                    bedroom_count=(features.get('bedrooms') or {}).get('value') or 0,
+                    bathroom_count=(features.get('bathrooms') or {}).get('value') or 0,
+                    parking_count=(features.get('parkingSpaces') or {}).get('value') or 0,
+                    property_type=PROPERTY_TYPE_MAPPING.get(type_info.get('id', ''), 0),
+                    property_type_raw=type_info.get('display') or '', url=url,
+                    scraped_at=datetime.now())
+                properties.append(prop)
+                by_id[house_id] = prop
+            prop = by_id[house_id]
+            for name in ('suburb', 'state', 'postcode'):
+                if address.get(name):
+                    setattr(prop, name, str(address[name]))
+            if prop.suburb and prop.postcode:
+                prop.address_line2 = f"{prop.suburb.lower().replace(' ', '-')}-{prop.state.lower()}-{prop.postcode}"
+            description = item.get('description')
+            if isinstance(description, str) and description.strip():
+                prop.description_en = BeautifulSoup(description, 'html.parser').get_text('\n', strip=True)
+            available = (item.get('availableDate') or {}).get('display', '')
+            if available:
+                parsed = parse_available_date(available)
+                if parsed:
+                    prop.available_date = parsed
+            image = ((item.get('media') or {}).get('mainImage') or {}).get('templatedUrl', '')
+            image = image.replace('{size}', '800x600')
+            if image and is_valid_image_url(image):
+                prop.thumbnail_url = image
     
     def _find_listings(self, soup: BeautifulSoup) -> List:
         """查找所有房源卡片"""

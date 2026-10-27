@@ -18,6 +18,7 @@ from ..utils import (
     parse_available_date, is_valid_image_url
 )
 from ..utils.browser import BrowserManager, BrowserType
+from ..utils.embedded import domain_search
 
 logger = logging.getLogger(__name__)
 
@@ -79,12 +80,13 @@ class DomainScraper(BaseScraper):
         
         try:
             # 使用 Playwright
-            self.browser = BrowserManager(
-                browser_type=BrowserType.PLAYWRIGHT,
-                source="domain",
-                profile_dir=self.profile_dir
-            )
-            self.browser.create_driver()
+            if self.browser is None:
+                self.browser = BrowserManager(
+                    browser_type=BrowserType.PLAYWRIGHT,
+                    source="domain",
+                    profile_dir=self.profile_dir
+                )
+                self.browser.create_driver()
             
             page = 1
             while page <= self.config.max_pages:
@@ -138,7 +140,7 @@ class DomainScraper(BaseScraper):
             import traceback
             traceback.print_exc()
         finally:
-            if self.browser:
+            if self.browser and not self.config.retain_browser:
                 self.browser.close()
                 self.browser = None
         
@@ -181,8 +183,49 @@ class DomainScraper(BaseScraper):
             except Exception as e:
                 logger.debug(f"解析房源失败: {e}")
         
+        self._complete_embedded(properties, soup)
         return properties
-    
+
+    def _complete_embedded(self, properties, soup):
+        data = domain_search(soup)
+        if 'listingSearchResultIds' in data:
+            expected = {str(value) for value in data['listingSearchResultIds']}
+            properties[:] = [prop for prop in properties if prop.house_id in expected]
+        by_id = {prop.house_id: prop for prop in properties}
+        for value in data.get('listingSearchResultIds', []):
+            house_id = str(value)
+            model = (data.get('listingsMap', {}).get(house_id) or {}).get('listingModel') or {}
+            address, features = model.get('address') or {}, model.get('features') or {}
+            url = model.get('url') or ''
+            if url.startswith('/'):
+                url = self.BASE_URL + url
+            if house_id not in by_id:
+                if not url.startswith(self.BASE_URL + '/'):
+                    continue
+                prop = PropertyData(house_id=house_id, source=self.SOURCE,
+                    price_per_week=extract_price(model.get('price', '')),
+                    address_line1=address.get('street') or 'Address withheld', url=url, scraped_at=datetime.now())
+                properties.append(prop)
+                by_id[house_id] = prop
+            prop = by_id[house_id]
+            for name in ('suburb', 'state', 'postcode'):
+                if address.get(name):
+                    value = str(address[name])
+                    setattr(prop, name, value.lower() if name == 'suburb' else value)
+            if prop.suburb and prop.postcode:
+                prop.address_line2 = f"{prop.suburb.replace(' ', '-')}-{prop.state.lower()}-{prop.postcode}"
+            for field, feature in (('bedroom_count', 'beds'), ('bathroom_count', 'baths'), ('parking_count', 'parking')):
+                if isinstance(features.get(feature), (int, float)):
+                    setattr(prop, field, int(features[feature]))
+            kind = features.get('propertyTypeFormatted')
+            if kind:
+                prop.property_type_raw = kind
+                prop.property_type = PROPERTY_TYPE_MAPPING.get(kind.lower(), 5)
+            for image in model.get('images', []):
+                if isinstance(image, str) and is_valid_image_url(image):
+                    prop.thumbnail_url = image
+                    break
+
     def _parse_listing_item(self, listing) -> Optional[PropertyData]:
         """解析单个房源列表项"""
         # 价格
@@ -320,7 +363,9 @@ class DomainScraper(BaseScraper):
                     
                     logger.debug(f"爬取详情 ({i+1}/{len(to_scrape)}): {url}")
                     
-                    self.browser.navigate(url, wait_time=3.0)
+                    if not self.browser.navigate(url, wait_time=3.0):
+                        logger.warning("Domain detail navigation failed: %s", prop.house_id)
+                        continue
                     
                     # 滚动加载
                     for _ in range(2):

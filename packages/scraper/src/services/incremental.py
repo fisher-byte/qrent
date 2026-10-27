@@ -10,6 +10,9 @@ def address_key(prop, include_postcode=True):
     state = prop.state.upper().strip()
     if not address or not suburb or not state or (include_postcode and not re.fullmatch(r"\d{4}", postcode)):
         return None
+    if any(phrase in address for phrase in ('address available', 'address withheld', 'address on request',
+                                           'address on application', 'contact agent')):
+        return None
     for word, short in {"street": "st", "road": "rd", "avenue": "ave", "parade": "pde"}.items():
         address = re.sub(r"\b" + word + r"\b", short, address)
     address = re.sub(r"[.,]", "", address)

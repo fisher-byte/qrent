@@ -58,6 +58,14 @@ class AddressTests(unittest.TestCase):
 
 
 class IncrementalTests(unittest.TestCase):
+    def test_withheld_addresses_are_never_cross_source_identity_matches(self):
+        from src.services.incremental import reuse_details
+        ref = listing(address_line1='Address available on request', description_en='Different home',
+                      thumbnail_url='https://cdn.example/a.jpg', available_date=datetime(2026, 11, 1))
+        target = listing(PropertySource.REALESTATE, address_line1='Address available on request')
+        self.assertEqual(reuse_details([target], [ref]), 0)
+        self.assertFalse(target.description_en)
+
     def test_postcode_reuse_requires_same_unit_and_unambiguous_reference(self):
         from src.services.incremental import complete_postcodes
         target = listing(PropertySource.REALESTATE, postcode="")
