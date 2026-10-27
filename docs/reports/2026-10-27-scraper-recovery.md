@@ -53,6 +53,7 @@ Camoufox 独立全量只写自己的 SQLite 与断点，源库和主库分开；
 - loopback HTTP/CONNECT 出口也统计浏览器后台连接，仅房源目标和小型 IP 校验走付费。过滤规则、更新、视频组件走普通网络。`proxy_wire_bytes` 与页面计数分别记录，预算同时约束两项，供应商读数另行核对。
 - Domain 详情复用同一次列表浏览器，修复切换浏览器指纹后出现的 403。Real Estate 的 `Vic` 等州名统一转大写后校验。
 - Real Estate 列表内嵌数据已有完整描述、可入住日期、图片链接与位置，通常无需额外详情请求。两站保留各自 ID 和链接，同地址含房号、价格、卧室相同的近期完整信息可复用，隐藏地址不跨站匹配。
+- 旧库可能只有基础表详情而 enrichment 缺行或字段为空。读写现按“新非空值 → 旧 JSON → 旧 SQL”保留正文、中译、关键词、图片和入住日期，避免基础表有数据而导出读空；七日跨站规则与身份校验保持。修复已通过 109 项本机测试，待正在运行的采集结束后部署；不批量改写旧库。
 - 千问从失效的 `qwen-plus-1220` 改为环境可配置的 `qwen-plus`，真实调用和单条评分成功。全量评分需显式启用，当前不批量调用模型。
 - 使用 Python 3.11、Camoufox 0.5.8、Playwright 1.62.0、DashScope 2.0.2。代理会话设计参考恢复的 Qrent LycheeIP/gost 代码；千问配置私下复用本机 `pdftomd` 的 DashScope 配置，均未提交凭据。
 
@@ -124,6 +125,10 @@ Domain 使用官方 Sydney Region NSW / Melbourne Region VIC 搜索。Real Estat
 10 月 28 日真实 cron 已在主任务持锁时退出 75；03:00 备份已实际生成 66,482,176 bytes 的 `properties_20261028.db`，日志记录路径，未依赖手动触发。
 
 数据增长后，主库约 229 MB、根盘余量约 3.9 GB，原先 30 份未压缩备份会超出空间。新增兼容的 `ops/backup_sqlite.py --gzip`：在线复制含 WAL 的一致快照，quick_check 后流式压缩、0600、原子替换，失败保留上个有效备份。一次真实只读试验约 229.4 MB → 37.0 MB（节省 83.87%），7.63 秒；解压恢复后 quick_check 和两表行数核验通过，临时副本已清理。100 项本机测试通过；此处记录的是候选实测，cron 的正式切换待主任务释放部署锁后执行。
+
+07:33 已部署 550a94b，102 项本机及服务器测试通过。随后正式备份 cron 改为 `--gzip`，30 日清理同时覆盖 `.db` 与 `.db.gz`；各命令 `/bin/sh -n` 与只读清理 dry-run 通过。正式目录产物为 39,931,515 bytes，解压 246,202,368 bytes、quick_check=ok，properties 46,966 / enrichment 45,446，与静止原库一致。旧未压缩备份仍保留。
+
+Domain 的固定 preset / no-uBO 已提升至主任务配置，preset 独立保存在私有 state 目录；原环境和 cron 已备份。07:37 worker 4188452 续跑，悉尼根最新实际总量 13,161、覆盖 13,167，通过真实父页刷新保留成功子树；墨尔本开始持续入库，仍使用普通网络。两城完整结束和最终流量继续核验。
 
 - 首次恢复备份：`/root/qrent-scraper/backup/pre-recovery-20261027`。
 - 出口修复备份：`/root/qrent-scraper/backup/pre-egress-20261027_220341`。

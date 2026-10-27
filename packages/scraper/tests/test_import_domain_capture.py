@@ -31,6 +31,81 @@ def node(query, ids, *, total=None, children=()):
 
 
 class ImportDomainCaptureTests(unittest.TestCase):
+    def test_import_preserves_sql_only_or_empty_json_details_and_keeps_both_rows_consistent(self):
+        names = ('description_en', 'description_cn', 'keywords', 'thumbnail_url', 'available_date')
+        expected = ('Existing body', '已有正文', 'balcony', 'https://cdn.example/existing.jpg', '2026-11-01T00:00:00')
+        for kind in ('healthy', 'missing', 'empty'):
+            with self.subTest(kind=kind):
+                store = SQLiteStore(self.target_db)
+                prop = self.prop('S1')
+                for name, value in zip(names, expected):
+                    setattr(prop, name, datetime.fromisoformat(value) if name == 'available_date' else value)
+                store.save([prop])
+                if kind == 'healthy':
+                    store.connection.execute("UPDATE properties SET description_en='SQL fallback' WHERE house_id='S1' AND source='domain'")
+                elif kind == 'missing':
+                    store.connection.execute("DELETE FROM property_enrichment WHERE house_id='S1' AND source='domain'")
+                elif kind == 'empty':
+                    data = json.loads(store.connection.execute("SELECT payload FROM property_enrichment WHERE house_id='S1' AND source='domain'").fetchone()[0])
+                    data.update({name: None for name in names})
+                    store.connection.execute("UPDATE property_enrichment SET payload=? WHERE house_id='S1' AND source='domain'", (json.dumps(data),))
+                store.connection.commit()
+                store.close()
+                self.assertEqual(self.call(apply=True)['status'], 'pending_validation')
+                store = SQLiteStore(self.target_db)
+                try:
+                    sql = store.connection.execute('SELECT '+','.join(names)+" FROM properties WHERE house_id='S1' AND source='domain'").fetchone()
+                    data = json.loads(store.connection.execute("SELECT payload FROM property_enrichment WHERE house_id='S1' AND source='domain'").fetchone()[0])
+                    prop = next(prop for prop in store.recent(days=365) if prop.house_id == 'S1')
+                    for name, value, wanted in zip(names, sql, expected):
+                        if name == 'available_date':
+                            self.assertEqual(datetime.fromisoformat(value), datetime.fromisoformat(wanted))
+                            self.assertEqual(datetime.fromisoformat(data[name]), datetime.fromisoformat(wanted))
+                            self.assertEqual(getattr(prop, name), datetime.fromisoformat(wanted))
+                        else:
+                            self.assertEqual((value, data[name], getattr(prop,name)), (wanted, wanted, wanted))
+                finally:
+                    store.close()
+
+    def test_import_new_nonempty_details_win_and_source_sql_fills_empty_payload_fields(self):
+        from ops.import_domain_capture import source_payloads
+        store = SQLiteStore(self.source_db)
+        prop = self.prop('S1')
+        prop.description_en = 'Source body'
+        prop.description_cn = '来源正文'
+        prop.keywords = 'source balcony'
+        prop.thumbnail_url = 'https://cdn.example/source.jpg'
+        prop.available_date = datetime(2026, 11, 2)
+        store.save([prop])
+        data = json.loads(store.connection.execute("SELECT payload FROM property_enrichment WHERE house_id='S1' AND source='domain'").fetchone()[0])
+        for name in ('description_en', 'description_cn', 'keywords', 'thumbnail_url', 'available_date'):
+            data[name] = None
+        store.connection.execute("UPDATE property_enrichment SET payload=? WHERE house_id='S1' AND source='domain'", (json.dumps(data),))
+        store.connection.commit()
+        store.close()
+        self.assertEqual(source_payloads(self.source_db, self.source)['S1']['description_en'], 'Source body')
+        target = SQLiteStore(self.target_db)
+        old = self.prop('S1')
+        old.description_en = 'Older target body'
+        old.description_cn = '旧目标正文'
+        old.keywords = 'old keywords'
+        old.thumbnail_url = 'https://cdn.example/old.jpg'
+        old.available_date = datetime(2026, 11, 1)
+        target.save([old])
+        target.close()
+        self.call(apply=True)
+        target = SQLiteStore(self.target_db)
+        try:
+            prop = next(prop for prop in target.recent(days=365) if prop.house_id == 'S1')
+            self.assertEqual((prop.description_en, prop.description_cn, prop.keywords, prop.thumbnail_url, prop.available_date),
+                             ('Source body', '来源正文', 'source balcony', 'https://cdn.example/source.jpg', datetime(2026, 11, 2)))
+            sql = target.connection.execute("SELECT description_en,description_cn,keywords,thumbnail_url,available_date FROM properties WHERE house_id='S1' AND source='domain'").fetchone()
+            payload = json.loads(target.connection.execute("SELECT payload FROM property_enrichment WHERE house_id='S1' AND source='domain'").fetchone()[0])
+            for name, value in zip(('description_en', 'description_cn', 'keywords', 'thumbnail_url', 'available_date'), sql):
+                self.assertEqual(payload[name], value)
+        finally:
+            target.close()
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

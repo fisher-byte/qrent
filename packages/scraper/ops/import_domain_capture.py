@@ -23,7 +23,7 @@ FIELDS = ('house_id', 'source', 'price_per_week', 'address_line1', 'address_line
           'postcode', 'bedroom_count', 'bathroom_count', 'parking_count', 'property_type',
           'property_type_raw', 'description_en', 'description_cn', 'keywords', 'url', 'thumbnail_url',
           'available_date', 'published_at', 'scraped_at')
-KEEP_FIELDS = {'description_en', 'description_cn', 'keywords', 'thumbnail_url', 'available_date'}
+KEEP_FIELDS = ('description_en', 'description_cn', 'keywords', 'thumbnail_url', 'available_date')
 PROPERTY_UPSERT = (
     f"INSERT INTO properties ({','.join(FIELDS)},updated_at,is_active) "
     f"VALUES ({','.join('?' for _ in range(len(FIELDS) + 1))},1) "
@@ -144,7 +144,8 @@ def source_payloads(database, state):
         for identity, (source, city) in state['seen'].items():
             house_id = identity.removeprefix('domain:')
             row = connection.execute(
-                'SELECT p.state,e.payload FROM properties p JOIN property_enrichment e '
+                'SELECT p.state,e.payload,' + ','.join('p.' + name for name in KEEP_FIELDS) +
+                ' FROM properties p JOIN property_enrichment e '
                 'ON p.house_id=e.house_id AND p.source=e.source WHERE p.house_id=? AND p.source=?',
                 (house_id, 'domain')).fetchone()
             require(row is not None, 'Source seen listing is missing from SQLite')
@@ -154,6 +155,9 @@ def source_payloads(database, state):
             require(source == 'domain' and data['source'] == 'domain' and data['house_id'] == house_id
                     and data['state'] == row[0] == CITY_STATES[city]
                     and data.get('city', city) == city, 'Source payload identity or city/state mismatch')
+            for name, value in zip(KEEP_FIELDS, row[2:]):
+                if not data.get(name) and value:
+                    data[name] = value
             require(all(data[name] is None or isinstance(data[name], (str, int, float)) for name in FIELDS),
                     'Unsupported SQLite payload value')
             for name in ('scraped_at', 'published_at', 'available_date'):
@@ -191,15 +195,22 @@ def prepare_target(target, source, payloads, database, connection, capture):
     now = datetime.now().isoformat()
     for house_id, payload in payloads.items():
         data = copy.deepcopy(payload)
+        previous_sql = connection.execute('SELECT ' + ','.join(KEEP_FIELDS) +
+            ' FROM properties WHERE house_id=? AND source=?', (house_id, 'domain')).fetchone()
+        sql_details = dict(zip(KEEP_FIELDS, previous_sql)) if previous_sql else {}
         previous = connection.execute('SELECT payload FROM property_enrichment WHERE house_id=? AND source=?',
                                       (house_id, 'domain')).fetchone()
+        old = {}
         if previous:
             old = json.loads(previous[0])
             require(isinstance(old, dict), 'Invalid existing Domain enrichment payload')
-            for name in KEEP_FIELDS | {'average_score', 'scores'}:
-                if not data.get(name) and old.get(name):
-                    data[name] = old[name]
-            data['commute_times'] = {**old.get('commute_times', {}), **data.get('commute_times', {})}
+        for name in KEEP_FIELDS:
+            if not data.get(name):
+                data[name] = old.get(name) or sql_details.get(name) or data.get(name)
+        for name in ('average_score', 'scores'):
+            if not data.get(name) and old.get(name):
+                data[name] = old[name]
+        data['commute_times'] = {**old.get('commute_times', {}), **data.get('commute_times', {})}
         require(all(data[name] is None or isinstance(data[name], (str, int, float)) for name in FIELDS),
                 'Existing enrichment cannot be safely merged into SQLite')
         rows.append(([data[name] for name in FIELDS] + [now],
