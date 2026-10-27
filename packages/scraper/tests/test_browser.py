@@ -23,6 +23,34 @@ class Page:
 
 
 class BrowserTests(unittest.TestCase):
+    def test_domain_camoufox_can_keep_one_preset_without_ubo_or_locale_override(self):
+        from camoufox import DefaultAddons
+        context = MagicMock()
+        context.pages = [MagicMock()]
+        with tempfile.TemporaryDirectory() as folder:
+            preset_path = Path(folder) / 'preset.json'
+            preset = {'navigator': {'userAgent': 'Firefox fixture'}}
+            preset_path.write_text(json.dumps(preset))
+            with patch.dict(os.environ, {
+                'DOMAIN_BROWSER_ENGINE': 'camoufox', 'PROXY_SOURCES': 'realestate',
+                'DOMAIN_NATIVE_NETWORK': 'true', 'DOMAIN_CAMOUFOX_NO_UBO': 'true',
+                'DOMAIN_CAMOUFOX_PRESET_FILE': str(preset_path)}, clear=True), \
+                    patch('camoufox.sync_api.Camoufox') as camoufox, \
+                    patch('src.utils.browser.time.sleep'):
+                camoufox.return_value.__enter__.return_value = context
+                browser = BrowserManager(browser_type=BrowserType.PLAYWRIGHT, source='domain',
+                                         profile_dir=str(Path(folder) / 'profile'))
+                try:
+                    browser.create_driver()
+                    config = camoufox.call_args.kwargs
+                    self.assertEqual(config['fingerprint_preset'], preset)
+                    self.assertEqual(config['exclude_addons'], [DefaultAddons.UBO])
+                    self.assertNotIn('locale', config)
+                    self.assertFalse(config['geoip'])
+                    context.route.assert_not_called()
+                finally:
+                    browser.close()
+
     def test_direct_domain_json_search_uses_one_homepage_and_rejects_failed_payloads(self):
         url = 'https://www.domain.com.au/rent/sydney-region-nsw/?page=1'
         page = MagicMock()

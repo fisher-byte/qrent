@@ -71,6 +71,8 @@ Domain 的可选开源驱动是 [Patchright](https://github.com/Kaliiiiiiiiii-Vi
 
 `DOMAIN_NATIVE_NETWORK=true` 且 Domain 没有付费代理时，可设置 `DOMAIN_SEARCH_TRANSPORT=json`：先打开公开首页，在同一个浏览器会话里 GET 原搜索 URL，使用网站前端自身的 `Accept: application/json` 格式。直接校验真实返回的 `props` 中的地区、筛选、排序、分页和房源 ID，再解析 `listingsMap`；不合成 HTML 或搜索元数据。403、空响应和覆盖不足仍失败，详情页继续正常导航。默认 `navigation` 保留页面方式。都会区列表采集会跨价段复用 Domain 浏览器，失败续跑保留已完成叶查询，避免重新抓取整个分区树。
 
+Camoufox 的普通网络仍默认带有 uBlock Origin。对照实验可设置 `DOMAIN_CAMOUFOX_NO_UBO=true`；`DOMAIN_CAMOUFOX_PRESET_FILE` 指向私有的、从当前浏览器对应内置样本中选出的 JSON 字典，固定同一身份并使用主机 OS，不再覆盖其语言。两项只影响未代理的 Domain Camoufox，缺失或损坏的指定文件会失败；它们不保证目标站点不会限流。不要复制个人浏览器 Cookie 或账号 profile。
+
 异机补采只有在 Domain-only 全量和实际进程均成功、付费计数为零时，才能用 `ops/import_domain_capture.py` 校验导入。默认 dry-run，`--apply` 取得主任务锁后备份、upsert，并保持目标 partial；主 runner 仍须显式续跑核验，才能建立完整基线。
 代理会话设计参考取回的 Qrent 服务器 LycheeIP/gost 代码，当前连接来自 FlashProxy Residential Lite；千问配置私下复用本机 `pdftomd` 项目的 DashScope 密钥。不在仓库中保存凭据。
 

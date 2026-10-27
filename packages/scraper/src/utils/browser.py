@@ -9,6 +9,8 @@ import time
 import os
 import asyncio
 import json
+import platform
+from pathlib import Path
 from urllib.parse import urlsplit
 from typing import Optional
 from contextlib import contextmanager
@@ -177,11 +179,24 @@ class BrowserManager:
             
             if engine == 'camoufox':
                 from camoufox.sync_api import Camoufox
-                self._camoufox_manager = Camoufox(
+                camoufox_options = dict(
                     persistent_context=True, user_data_dir=profile_path,
                     headless=use_headless, proxy=proxy,
                     geoip=(self.geoip_address or True) if proxy else False, enable_cache=True,
                     locale='en-AU', service_workers='allow' if native_domain else 'block')
+                if native_domain:
+                    if os.getenv('DOMAIN_CAMOUFOX_NO_UBO', '').lower() == 'true':
+                        from camoufox import DefaultAddons
+                        camoufox_options['exclude_addons'] = [DefaultAddons.UBO]
+                    preset_path = os.getenv('DOMAIN_CAMOUFOX_PRESET_FILE')
+                    if preset_path:
+                        preset = json.loads(Path(preset_path).read_text())
+                        if not isinstance(preset, dict) or not preset:
+                            raise ValueError('Domain Camoufox preset must be a nonempty JSON object')
+                        camoufox_options.update(fingerprint_preset=preset,
+                            os={'Darwin': 'macos', 'Windows': 'windows'}.get(platform.system(), 'linux'))
+                        camoufox_options.pop('locale')
+                self._camoufox_manager = Camoufox(**camoufox_options)
                 self._playwright_context = self._camoufox_manager.__enter__()
             elif engine == 'patchright':
                 from patchright.sync_api import sync_playwright as patched_playwright
