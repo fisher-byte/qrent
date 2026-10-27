@@ -22,6 +22,13 @@ def listing(source=PropertySource.DOMAIN, house_id="123", **changes):
 
 
 class AddressTests(unittest.TestCase):
+    def test_domain_legacy_paginator_accepts_verified_json_page_numbers(self):
+        scraper = DomainScraper()
+        self.assertTrue(scraper._has_next_page({'props': {'currentPage': 1, 'totalPages': 2}}, 1))
+        self.assertFalse(scraper._has_next_page({'props': {'currentPage': 2, 'totalPages': 2}}, 2))
+        with self.assertRaises(ValueError):
+            scraper._has_next_page({'props': {'currentPage': 1, 'totalPages': 2}}, 2)
+
     def test_domain_public_json_keeps_listing_identity_unit_price_and_features(self):
         document = {'props': {'listingSearchResultIds': [123], 'listingsMap': {'123': {'listingModel': {
             'url': '/2-10-example-street-melbourne-vic-3000-123', 'price': '$600 per week',

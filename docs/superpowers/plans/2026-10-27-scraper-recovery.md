@@ -114,4 +114,6 @@
 - [x] 本机 Patchright + 已安装 Chrome、普通网络、首页预热，两城各 2 页均 200，80 条真实结构化 ID 与解析一致。服务器官方 Chrome for Testing 156.0.8078.73 + Patchright：首个列表导航 403，但同会话公开 JSON GET 返回 200；其余 3 列表导航为 200。
 - [x] JSON 实际含 props.listingsMap / listingSearchResultIds / totalListings / pageViewMetadata.searchRequest；服务端样本 20 条全部解析且 ID 一致。新增可选真实 JSON 输入、原有元数据校验、单会话复用与旧失败父节点修复，不以页面 200 代替完整覆盖。
 - [x] Real Estate 复用刚验证的 AU 出口 IP 给 Camoufox，避免第二次 geoip 自动查 IP 超时；原始 IP 不写结果报告。
-- [ ] 部署后跑独立两城 Domain JSON 试验，核验实际退出、零付费与覆盖；通过后显式续跑主全量并复核剩余 Real Estate 失败价段。
+- [x] 62e0436 已部署，91 项本机/服务器测试通过。服务器独立 Domain JSON 两城试验 399 条/20 页/实际退出 0/错误 0/付费请求连接与字节 0；本机同入口也 399 条且退出 0。
+- [x] 复核补上根查询意外价格/卧室/额外地区/未知限制拒绝，以及旧 Domain 入口 JSON 分页兼容；不以过滤后总量冒充完整都会区。
+- [ ] 显式续跑主全量并复核剩余 Real Estate 失败价段，完整后验证每日增量。

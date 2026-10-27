@@ -93,8 +93,14 @@ def read_snapshot(source, html, query, page=1):
             locations = request['locations']
             state = 'NSW' if query.city == 'sydney' else 'VIC'
             expected = query.city.title() + ' Region'
-            if not any(item.get('region') == expected and item.get('state') == state for item in locations):
+            if locations != [{'region': expected, 'state': state}]:
                 raise SearchMetadataError('Domain resolved a different metro area')
+            known_fields = {'page', 'pageSize', 'locations', 'sort', 'listingType', 'ruralOnly', 'tags',
+                            'excludeDepositTaken', 'minPrice', 'maxPrice', 'minBedrooms', 'maxBedrooms'}
+            if (set(request) - known_fields or request.get('listingType') != 'Rent'
+                    or request.get('ruralOnly', False) is not False or request.get('tags')
+                    or request.get('excludeDepositTaken') is not True or request.get('page') != page):
+                raise SearchMetadataError('Domain applied unrequested search restrictions or a different page')
             snapshot = SearchSnapshot(int(data['totalListings']), int(data['totalPages']),
                                       int(data['currentPage']), int(request['pageSize']), expected, request,
                                       frozenset(str(value) for value in data['listingSearchResultIds']))
@@ -121,12 +127,11 @@ def read_snapshot(source, html, query, page=1):
             min_beds, max_beds = bedrooms.get('minimum'), bedrooms.get('maximum')
         if snapshot.current != page or snapshot.total < 0 or snapshot.pages < 0 or snapshot.page_size < 1:
             raise SearchMetadataError('Search pagination is inconsistent or redirected')
-        if query.low is not None and (minimum != query.low or maximum != query.high):
+        if (0 if minimum is None else minimum) != (query.low or 0) or maximum != query.high:
             raise SearchMetadataError('Site ignored or changed the requested price filter')
-        if query.beds is not None:
-            expected_max = query.beds if query.beds < 5 else None
-            if min_beds != query.beds or max_beds != expected_max:
-                raise SearchMetadataError('Site ignored or changed the requested bedroom filter')
+        expected_max = query.beds if query.beds is not None and query.beds < 5 else None
+        if (0 if min_beds is None else min_beds) != (query.beds or 0) or max_beds != expected_max:
+            raise SearchMetadataError('Site ignored or changed the requested bedroom filter')
         return snapshot
     except (KeyError, TypeError, ValueError, AttributeError) as error:
         raise SearchMetadataError('No verified search metadata; page may be blocked') from error

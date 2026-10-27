@@ -159,6 +159,12 @@ class DomainScraper(BaseScraper):
     
     def _has_next_page(self, html: str, current_page: int) -> bool:
         """检查是否有下一页"""
+        if isinstance(html, dict):
+            data = domain_search(html)
+            if (type(data.get('currentPage')) is not int or type(data.get('totalPages')) is not int
+                    or data['currentPage'] != current_page or data['totalPages'] < 0):
+                raise ValueError('Domain JSON pagination is missing or inconsistent')
+            return data['totalPages'] > current_page
         soup = BeautifulSoup(html, 'html.parser')
         next_buttons = soup.find_all('a', {'data-testid': 'paginator-navigation-button'})
         

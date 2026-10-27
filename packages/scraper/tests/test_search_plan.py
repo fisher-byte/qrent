@@ -9,7 +9,8 @@ from src.services.search_plan import SearchQuery, SearchMetadataError, read_snap
 
 def domain_html(total=13182, pages=50, **request):
     query = {'page': 1, 'pageSize': 20, 'locations': [{'region': 'Sydney Region', 'state': 'NSW'}],
-             'sort': {'sortKey': 'DateUpdated', 'direction': 'Descending'}}
+             'sort': {'sortKey': 'DateUpdated', 'direction': 'Descending'},
+             'listingType': 'Rent', 'ruralOnly': False, 'tags': [], 'excludeDepositTaken': True}
     query.update(request)
     data = {'props': {'pageProps': {'componentProps': {
         'currentPage': 1, 'totalPages': pages, 'totalListings': total,
@@ -19,6 +20,20 @@ def domain_html(total=13182, pages=50, **request):
 
 
 class SearchPlanTests(unittest.TestCase):
+    def test_domain_root_rejects_extra_regions_and_unrequested_restrictions(self):
+        restrictions = [
+            {'minPrice': 750, 'maxPrice': 1000}, {'maxPrice': 1000},
+            {'minBedrooms': 2, 'maxBedrooms': 2}, {'maxBedrooms': 2},
+            {'locations': [{'region': 'Sydney Region', 'state': 'NSW'},
+                           {'region': 'Newcastle Region', 'state': 'NSW'}]},
+            {'listingType': 'Sale'}, {'ruralOnly': True}, {'tags': ['New']},
+            {'excludeDepositTaken': False}, {'propertyTypes': ['House']},
+        ]
+        for restriction in restrictions:
+            with self.subTest(restriction=restriction), self.assertRaises(SearchMetadataError):
+                read_snapshot('domain', domain_html(total=20, pages=1, **restriction),
+                              SearchQuery('domain', 'sydney'))
+
     def test_domain_public_json_preserves_scope_ordering_and_ids_validation(self):
         html = domain_html(total=2, pages=1)
         component = json.loads(html.split('>', 1)[1].split('</script>')[0])['props']['pageProps']['componentProps']
