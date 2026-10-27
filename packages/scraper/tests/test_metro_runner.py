@@ -12,16 +12,18 @@ from urllib.parse import parse_qs, urlsplit
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import metro_runner as runner
 from src.models import PropertySource
-from src.services.search_plan import SearchQuery, SearchSnapshot
+from src.services.search_plan import SearchQuery, SearchSnapshot, SearchMetadataError
 from test_recovery import listing
 
 
 class Harness:
-    def __init__(self, spec, fail_pages=()):
+    def __init__(self, spec, fail_pages=(), metadata_failures=0, navigation_failures=0):
         self.spec, self.fail_pages = spec, set(fail_pages)
         self.visits, self.sessions, self.verified = [], [], []
         self.detail_calls = 0
         self.current = None
+        self.metadata_failures = metadata_failures
+        self.navigation_failures = navigation_failures
 
     def browser_factory(self, source, **kwargs):
         harness = self
@@ -31,12 +33,19 @@ class Harness:
                 match = re.search(r'/list-(\d+)', url)
                 page = int(match.group(1)) if match else int(parse_qs(urlsplit(url).query)['page'][0])
                 harness.visits.append(page)
+                if harness.navigation_failures:
+                    harness.navigation_failures -= 1
+                    self._navigation_status = 403
+                    return False
                 return page not in harness.fail_pages
             def get_page_source(self): return 'fixture'
             def close(self): pass
         return Browser()
 
     def snapshot(self, source, html, query, page):
+        if self.metadata_failures:
+            self.metadata_failures -= 1
+            raise SearchMetadataError('First rendered template has no verified search data')
         self.current = query, page
         data = self.spec(query, page)
         return SearchSnapshot(data['total'], data['pages'], page, data.get('size', 2), query.city, {},
@@ -78,6 +87,28 @@ def arguments(folder, source='domain', mode='full'):
 
 
 class MetroRunnerTests(unittest.TestCase):
+    def test_blocked_domain_session_retries_current_page_in_a_fresh_direct_browser(self):
+        harness = Harness(lambda query, page: {'total': 2, 'pages': 1, 'ids': ['A', 'B']}, navigation_failures=1)
+        with tempfile.TemporaryDirectory() as folder:
+            args = arguments(folder)
+            args.retries = 1
+            result = harness.run(args, [SearchQuery('domain', 'sydney')])
+            self.assertEqual((result['exit_code'], result['listings']), (0, 2))
+            self.assertEqual(harness.visits, [1, 1])
+            self.assertEqual(len(harness.sessions), 2)
+            self.assertEqual(result['browser_restarts'], 1)
+            self.assertEqual(harness.verified, [])
+
+    def test_first_unverified_render_retries_same_page_without_losing_rows(self):
+        harness = Harness(lambda query, page: {'total': 2, 'pages': 1, 'ids': ['A', 'B']}, metadata_failures=1)
+        with tempfile.TemporaryDirectory() as folder:
+            args = arguments(folder)
+            args.retries = 1
+            result = harness.run(args, [SearchQuery('domain', 'sydney')])
+            self.assertEqual((result['exit_code'], result['listings'], result['pages_visited']), (0, 2, 1))
+            self.assertEqual(harness.visits, [1, 1])
+            self.assertTrue(result['complete_inventory'])
+
     def test_incremental_includes_new_page_then_three_known_unchanged_pages(self):
         queries = [SearchQuery('domain', 'sydney')]
         with tempfile.TemporaryDirectory() as folder:

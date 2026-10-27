@@ -5,8 +5,11 @@ Provider credentials and targeting syntax are supplied through private env files
 """
 import os
 import threading
+import time
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass, field
+from email.utils import parsedate_to_datetime
 from urllib.parse import unquote, urlsplit
 
 import requests
@@ -59,6 +62,17 @@ def direct_headers(headers):
     return {k.lower(): v for k, v in headers.items() if k.lower() in allowed}
 
 
+def cache_directives(value):
+    directives = {}
+    for part in value.split(','):
+        name, _, value = part.strip().partition('=')
+        name = name.strip().lower()
+        if name in directives:
+            return None
+        directives[name] = value.strip().strip('"')
+    return directives
+
+
 def target_hosts():
     hosts = {host.strip().lower().rstrip('.') for host in
              os.getenv("PROXY_TARGET_HOSTS", "realestate.com.au,domain.com.au").split(',') if host.strip()}
@@ -97,6 +111,8 @@ class TrafficBudget:
     direct_wire_bytes: int = 0
     proxy_connections: int = 0
     direct_connections: int = 0
+    cache_hits: int = 0
+    cache_saved_body_bytes: int = 0
     _wire_hosts: dict = field(default_factory=dict, repr=False)
     _lock: object = field(default_factory=threading.Lock, repr=False, compare=False)
 
@@ -148,6 +164,11 @@ class TrafficBudget:
             if self.proxy_wire_bytes >= self.max_proxy_bytes:
                 self.exhausted = True
 
+    def record_cache_hit(self, size):
+        with self._lock:
+            self.cache_hits += 1
+            self.cache_saved_body_bytes += max(0, size)
+
     def snapshot(self):
         with self._lock:
             result = {name: getattr(self, name) for name in self.__dataclass_fields__ if not name.startswith('_')}
@@ -173,16 +194,105 @@ def get_run_budget():
 
 
 class NetworkPolicy:
-    def __init__(self, proxied, budget=None):
+    def __init__(self, proxied, budget=None, *, allow_media=False,
+                 cache_max_bytes=32_000_000, cache_max_entries=128,
+                 cache_max_item_bytes=4_000_000, cache_ttl=300):
         self.proxied = proxied
+        self.allow_media = allow_media and not proxied
         self.budget = budget or get_run_budget()
         self.pending = {}
         self.direct = requests.Session()
         self.direct.trust_env = False
+        self._cache = OrderedDict()
+        self._cache_bytes = 0
+        self._cache_max_bytes = max(0, cache_max_bytes)
+        self._cache_max_entries = max(0, cache_max_entries)
+        self._cache_max_item_bytes = max(0, cache_max_item_bytes)
+        self._cache_ttl = max(0, cache_ttl)
+
+    def _cache_request(self, request):
+        parsed = urlsplit(request.url)
+        headers = {name.lower(): value for name, value in request.headers.items()}
+        controls = cache_directives(headers.get('cache-control', ''))
+        if controls is None or {'no-cache', 'no-store', 'private'} & controls.keys():
+            return False
+        try:
+            if 'max-age' in controls and int(controls['max-age']) <= 0:
+                return False
+        except ValueError:
+            return False
+        return (request.resource_type in {'script', 'stylesheet'}
+                and parsed.scheme in {'http', 'https'} and parsed.username is None
+                and parsed.password is None
+                and not any(part in {'challenge', 'challenge-platform', 'captcha', 'recaptcha', 'turnstile'}
+                            for part in parsed.path.lower().split('/'))
+                and headers.get('pragma', '').lower() != 'no-cache')
+
+    def _cached(self, key):
+        now = time.monotonic()
+        for old_key, entry in list(self._cache.items()):
+            if entry[0] <= now:
+                self._cache_bytes -= self._cache.pop(old_key)[1]
+        entry = self._cache.get(key)
+        if entry:
+            self._cache.move_to_end(key)
+            return entry[2]
+        return None
+
+    def _store_cache(self, key, response, result, resource_type):
+        if (response.status_code != 200 or not self._cache_max_entries
+                or len(result['body']) > self._cache_max_item_bytes
+                or 'set-cookie' in response.headers
+                or '*' in {part.strip() for part in response.headers.get('vary', '').split(',')}):
+            return
+        content_type = response.headers.get('content-type', '').split(';', 1)[0].strip().lower()
+        allowed = {'text/css'} if resource_type == 'stylesheet' else {
+            'application/javascript', 'text/javascript', 'application/x-javascript',
+            'application/ecmascript', 'text/ecmascript'}
+        if content_type not in allowed:
+            return
+        directives = cache_directives(response.headers.get('cache-control', ''))
+        if directives is None or {'no-store', 'no-cache', 'private'} & directives.keys():
+            return
+        try:
+            # This is a per-browser cache; a shared-cache lifetime must never
+            # relax an origin's stricter max-age for this client.
+            lifetime = min(int(directives[name]) for name in ('max-age', 's-maxage') if name in directives)
+            age = max(0, int(response.headers.get('age', '0')))
+            if response.headers.get('date'):
+                age = max(age, time.time() - parsedate_to_datetime(response.headers['date']).timestamp())
+            ttl = min(self._cache_ttl, lifetime - age)
+        except (ValueError, TypeError, OverflowError):
+            return
+        cost = (len(result['body']) + len(key[0].encode())
+                + sum(len(name.encode()) + len(value.encode()) for name, value in key[1])
+                + sum(len(name.encode()) + len(value.encode()) for name, value in result['headers'].items()))
+        if ttl <= 0 or cost > self._cache_max_bytes:
+            return
+        while self._cache and (len(self._cache) >= self._cache_max_entries
+                               or self._cache_bytes + cost > self._cache_max_bytes):
+            _, entry = self._cache.popitem(last=False)
+            self._cache_bytes -= entry[1]
+        self._cache[key] = (time.monotonic() + ttl, cost, result)
+        self._cache_bytes += cost
+
+    def observe_native(self, request):
+        """Count unproxied browser traffic without intercepting its transport."""
+        if self.proxied:
+            raise ValueError('Native observation requires an unproxied browser')
+        # Native requests have already started. Keep their eventual byte counts
+        # even when the budget signals navigation should stop.
+        self.pending[request] = 'direct'
+        try:
+            self.budget.reserve('direct')
+        except BudgetExceeded:
+            pass
 
     def route(self, route):
         request = route.request
         mode = resource_route(request.url, request.resource_type)
+        if mode == "block" and self.allow_media:
+            mode = "direct"
         if mode == "block":
             self.budget.blocked += 1
             route.abort()
@@ -199,8 +309,21 @@ class NetworkPolicy:
             if request.method != "GET":
                 route.abort()
                 return
-            with self.direct.get(request.url, headers=direct_headers(request.headers),
-                                 timeout=8, stream=True, allow_redirects=False) as response:
+            self.direct.cookies.clear()
+            prepared = self.direct.prepare_request(requests.Request(
+                'GET', request.url, headers=direct_headers(request.headers)))
+            key = (request.url, tuple(sorted((name.lower(), value) for name, value in prepared.headers.items())))
+            cacheable = self._cache_request(request)
+            cached = self._cached(key) if cacheable else None
+            if not cacheable:
+                previous = self._cache.pop(key, None)
+                if previous:
+                    self._cache_bytes -= previous[1]
+            if cached is not None:
+                self.budget.record_cache_hit(len(cached['body']))
+                route.fulfill(**cached)
+                return
+            with self.direct.send(prepared, timeout=8, stream=True, allow_redirects=False) as response:
                 chunks = []
                 size = 0
                 for chunk in response.iter_content(65536):
@@ -213,11 +336,16 @@ class NetworkPolicy:
                            if k.lower() in {"content-type", "cache-control", "location", "vary",
                                             "access-control-allow-origin", "access-control-allow-credentials",
                                             "cross-origin-resource-policy", "etag", "last-modified"}}
-                route.fulfill(status=response.status_code, headers=headers, body=b"".join(chunks))
+                result = dict(status=response.status_code, headers=headers, body=b"".join(chunks))
+                if cacheable:
+                    self._store_cache(key, response, result, request.resource_type)
+                route.fulfill(**result)
         except (requests.RequestException, ValueError, BudgetExceeded):
             # Never retry a failed static download through the paid proxy.
             self.budget.blocked += 1
             route.abort()
+        finally:
+            self.direct.cookies.clear()
 
     def finished(self, request):
         mode = self.pending.pop(request, None)
@@ -234,4 +362,7 @@ class NetworkPolicy:
             self.budget.record(mode, 1024)
 
     def close(self):
+        self._cache.clear()
+        self._cache_bytes = 0
+        self.direct.cookies.clear()
         self.direct.close()

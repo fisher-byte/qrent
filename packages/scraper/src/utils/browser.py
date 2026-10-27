@@ -155,42 +155,49 @@ class BrowserManager:
             if proxy:
                 self.egress_proxy = EgressProxy(proxy, get_run_budget()).__enter__()
                 proxy = self.egress_proxy.browser_config()
+            native_domain = (self.source == 'domain' and not proxy
+                             and os.getenv('DOMAIN_NATIVE_NETWORK', '').lower() == 'true')
+            engine = os.getenv(f'{self.source.upper()}_BROWSER_ENGINE', os.getenv('BROWSER_ENGINE', 'chromium')).strip().lower()
+            if engine not in {'camoufox', 'firefox', 'chromium'}:
+                raise ValueError(f'Unsupported browser engine: {engine}')
             extra = {}
             executable = os.getenv('CHROMIUM_EXECUTABLE_PATH')
-            if executable:
+            if executable and engine == 'chromium':
                 extra['executable_path'] = executable
-            elif os.getenv('CHROMIUM_CHANNEL'):
+            elif engine == 'chromium' and os.getenv('CHROMIUM_CHANNEL'):
                 extra['channel'] = os.environ['CHROMIUM_CHANNEL']
             if proxy:
                 extra['proxy'] = proxy
             
-            if os.getenv('BROWSER_ENGINE', 'chromium').lower() == 'camoufox':
+            if engine == 'camoufox':
                 from camoufox.sync_api import Camoufox
                 self._camoufox_manager = Camoufox(
                     persistent_context=True, user_data_dir=profile_path,
                     headless=use_headless, proxy=proxy,
                     geoip=bool(proxy), enable_cache=True,
-                    locale='en-AU', service_workers='block')
+                    locale='en-AU', service_workers='allow' if native_domain else 'block')
                 self._playwright_context = self._camoufox_manager.__enter__()
             else:
                 self._playwright = sync_playwright().start()
-                self._playwright_context = self._playwright.chromium.launch_persistent_context(
+                launch = getattr(self._playwright, engine).launch_persistent_context
+                if engine == 'chromium':
+                    extra['args'] = [
+                        '--disable-blink-features=AutomationControlled',
+                        '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+                self._playwright_context = launch(
                     profile_path,
                     headless=use_headless,
-                    viewport={'width': 1920, 'height': 1080},
+                    viewport={'width': 1280, 'height': 720} if engine == 'firefox' else {'width': 1920, 'height': 1080},
                     locale='en-AU',
-                    service_workers='block',
-                    args=[
-                        '--disable-blink-features=AutomationControlled',
-                        '--no-sandbox',
-                        '--disable-setuid-sandbox',
-                        '--disable-dev-shm-usage',
-                    ],
+                    service_workers='allow' if native_domain else 'block',
                     **extra,
                 )
 
-            self.network_policy = NetworkPolicy(proxied=bool(proxy))
-            self._playwright_context.route('**/*', self.network_policy.route)
+            self.network_policy = NetworkPolicy(proxied=bool(proxy), allow_media=native_domain)
+            if native_domain:
+                self._playwright_context.on('request', self.network_policy.observe_native)
+            else:
+                self._playwright_context.route('**/*', self.network_policy.route)
             self._playwright_context.on('requestfinished', self.network_policy.finished)
             self._playwright_context.on('requestfailed', self.network_policy.failed)
             

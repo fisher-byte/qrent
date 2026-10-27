@@ -178,6 +178,8 @@ def capture(args):
         for key, item in state['queries'].items():
             if item['status'] == 'failed' and key not in state['queue']:
                 state['queue'].append(key)
+        # Retry unfinished direct collection before continuing paid inventory work.
+        state['queue'].sort(key=lambda key: state['queries'][key]['query']['source'] != 'domain')
         budget = restore_budget(state['traffic'], args.max_requests, args.proxy_bytes)
         set_run_budget(budget)
         references = {(ref.source.value, ref.house_id): ref for ref in store.recent()
@@ -208,12 +210,26 @@ def capture(args):
                     page = item['next_page']
                     for attempt in range(args.retries + 1):
                         if browser.navigate(query.url(page), wait_time=5 if page == 1 else 3):
-                            break
-                        if attempt == args.retries:
+                            html = browser.get_page_source()
+                            try:
+                                snapshot = read_snapshot(query.source, html, query, page)
+                            except SearchMetadataError:
+                                if attempt == args.retries:
+                                    raise
+                                logger.warning('%s page %s has unverified search metadata; retrying same URL', query.source, page)
+                            else:
+                                break
+                        elif attempt == args.retries:
                             raise RuntimeError('Navigation failed or blocked')
+                        elif query.source == 'domain' and getattr(browser, '_navigation_status', None) in {403, 429}:
+                            logger.warning('Domain rejected the session; retrying this page in a fresh direct browser')
+                            browser.close()
+                            shutil.rmtree(profile, ignore_errors=True)
+                            browser = BrowserManager(browser_type=BrowserType.PLAYWRIGHT,
+                                source=query.source, profile_dir=str(profile))
+                            browser.create_driver()
+                            state['browser_restarts'] = state.get('browser_restarts', 0) + 1
                         time.sleep(3)
-                    html = browser.get_page_source()
-                    snapshot = read_snapshot(query.source, html, query, page)
                     item.update(total=snapshot.total, visible_pages=snapshot.pages,
                                 scope=snapshot.scope, truncated=snapshot.truncated,
                                 sort=snapshot.request.get('sort') or snapshot.request.get('sortType'))
