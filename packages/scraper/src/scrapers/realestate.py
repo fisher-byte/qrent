@@ -248,7 +248,7 @@ class RealEstateScraper(BaseScraper):
             if address:
                 prop.postcode = str(address['postalCode'])
                 prop.suburb = address.get('addressLocality') or prop.suburb
-                prop.state = address.get('addressRegion') or prop.state
+                prop.state = str(address.get('addressRegion') or prop.state).strip().upper()
             if prop.suburb and prop.postcode:
                 prop.address_line2 = f"{prop.suburb.lower().replace(' ', '-')}-{prop.state.lower()}-{prop.postcode}"
 
@@ -344,6 +344,7 @@ class RealEstateScraper(BaseScraper):
             for name in ('suburb', 'state', 'postcode'):
                 if address.get(name):
                     setattr(prop, name, str(address[name]))
+            prop.state = prop.state.strip().upper()
             if prop.suburb and prop.postcode:
                 prop.address_line2 = f"{prop.suburb.lower().replace(' ', '-')}-{prop.state.lower()}-{prop.postcode}"
             description = item.get('description')

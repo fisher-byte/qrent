@@ -71,6 +71,13 @@ class EmbeddedListingTests(unittest.TestCase):
         self.assertEqual(props[0].price_per_week, 0)
         self.assertEqual(props[0].description_en, item['description'].strip())
 
+    def test_mixed_case_source_state_is_normalized_before_metro_validation(self):
+        item = embedded_listing()
+        item['address']['state'] = 'Vic'
+        prop = RealEstateScraper().parse_listing_page(listing_html([item]))[0]
+        self.assertEqual(prop.state, 'VIC')
+        self.assertEqual(prop.address_line2, 'carlton-vic-3053')
+
     def test_sponsored_items_outside_search_results_are_not_added(self):
         html = listing_html([embedded_listing()])
         root = json.loads(html.split('=', 1)[1].split(';</script>')[0])
