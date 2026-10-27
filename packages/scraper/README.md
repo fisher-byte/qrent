@@ -1,6 +1,6 @@
 # QRent Property Scraper
 
-A production-ready, modular property scraping framework for Australian rental market, specifically designed for university student accommodation near UNSW, USYD, and UTS.
+A modular collector for Australian rental listings from Domain and Real Estate. Current metro coverage, deployment evidence, and limits are recorded in the recovery report below.
 
 ## Fork 与都会区采集
 
@@ -20,7 +20,7 @@ A production-ready, modular property scraping framework for Australian rental ma
 
 # 试跑验收后启动全量。指定的 300 MB 是本次传输记录上限，不是账单承诺。
 .venv/bin/python packages/scraper/ops/remote_capture.py start \
-  --campaign metro-full-20261027 --mode full --proxy-bytes 300000000 \
+  --campaign metro-full-20261028 --mode full --proxy-bytes 300000000 \
   --detail-limit 0 --timeout 64800
 ```
 
@@ -31,6 +31,7 @@ A production-ready, modular property scraping framework for Australian rental ma
 - `state.json` 是私有续跑断点，`result.json` 是范围、质量、错误、流量报告；同时输出两站按城市分开的 `.csv.gz`。后台进程状态另写 `process-status.json`，不能仅凭结果文件推断进程结束。
 - `remote_capture.py start --resume` 只在旧进程确已终止后续跑。断点绑定区域配置、规划版本和根查询集合，范围改变时拒绝沿用。
 - `ops/run_metro.sh` 供现有每日 02:00 任务调用；`auto` 在缺少有效全量基线或基线超过 7 天时全量刷新，其他日期做增量采集。未完成全量不建立基线；未扫描和失败的数据不自动下架。
+- 两站的最新优先排序从页面元数据校验，缺失或不匹配时拒绝增量早停；Real Estate 旧房源的全部字段变化由每周全量覆盖。
 - 本轮代理累计购买上限为 USD 1.50，包含已购买的 USD 0.30 一次性额度，无自动续费。所有传输统计必须同时对照供应商实际扣量；最终数字见恢复报告。
 
 ## 2026-10-27 恢复运行入口
