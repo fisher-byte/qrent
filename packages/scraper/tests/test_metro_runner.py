@@ -78,6 +78,23 @@ def arguments(folder, source='domain', mode='full'):
 
 
 class MetroRunnerTests(unittest.TestCase):
+    def test_incremental_includes_new_page_then_three_known_unchanged_pages(self):
+        queries = [SearchQuery('domain', 'sydney')]
+        with tempfile.TemporaryDirectory() as folder:
+            args = arguments(folder)
+            full = Harness(lambda query, page: {'total': 10, 'pages': 5,
+                            'ids': [str(2*page-1), str(2*page)]})
+            self.assertEqual(full.run(args, queries)['exit_code'], 0)
+            args.mode, args.output = 'incremental', Path(folder) / 'incremental'
+            incremental = Harness(lambda query, page: {'total': 11, 'pages': 6,
+                'ids': ['new', '1'] if page == 1 else [str(2*page-2), str(2*page-1)]})
+            result = incremental.run(args, queries)
+            self.assertEqual(result['exit_code'], 0)
+            self.assertEqual(incremental.visits, [1, 2, 3, 4])
+            self.assertEqual(result['new_listings'], 1)
+            self.assertEqual(result['queries'][0]['stop_reason'], 'consecutive_known_unchanged_pages')
+            self.assertFalse(result['complete_inventory'])
+
     def test_extra_cards_cannot_hide_missing_structured_search_ids(self):
         harness = Harness(lambda query, page: {'total': 2, 'pages': 1,
                                              'ids': ['A', 'X'], 'result_ids': ['A', 'B']})

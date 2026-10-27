@@ -215,7 +215,8 @@ def capture(args):
                     html = browser.get_page_source()
                     snapshot = read_snapshot(query.source, html, query, page)
                     item.update(total=snapshot.total, visible_pages=snapshot.pages,
-                                scope=snapshot.scope, truncated=snapshot.truncated)
+                                scope=snapshot.scope, truncated=snapshot.truncated,
+                                sort=snapshot.request.get('sort') or snapshot.request.get('sortType'))
                     item.setdefault('first_total', snapshot.total)
                     props = scraper.parse_listing_page(html)
                     if snapshot.result_ids is not None:

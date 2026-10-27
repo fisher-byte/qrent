@@ -8,7 +8,8 @@ from src.services.search_plan import SearchQuery, SearchMetadataError, read_snap
 
 
 def domain_html(total=13182, pages=50, **request):
-    query = {'page': 1, 'pageSize': 20, 'locations': [{'region': 'Sydney Region', 'state': 'NSW'}]}
+    query = {'page': 1, 'pageSize': 20, 'locations': [{'region': 'Sydney Region', 'state': 'NSW'}],
+             'sort': {'sortKey': 'DateUpdated', 'direction': 'Descending'}}
     query.update(request)
     data = {'props': {'pageProps': {'componentProps': {
         'currentPage': 1, 'totalPages': pages, 'totalListings': total,
@@ -18,6 +19,29 @@ def domain_html(total=13182, pages=50, **request):
 
 
 class SearchPlanTests(unittest.TestCase):
+    def test_domain_rejects_ignored_newest_sort_before_incremental_early_stop(self):
+        for sort in (None, {'sortKey': 'Default', 'direction': 'Descending'},
+                     {'sortKey': 'DateUpdated', 'direction': 'Ascending'}):
+            with self.subTest(sort=sort), self.assertRaises(SearchMetadataError):
+                read_snapshot('domain', domain_html(sort=sort), SearchQuery('domain', 'sydney'))
+
+    def test_realestate_rejects_ignored_newest_sort(self):
+        query = SearchQuery('realestate', 'melbourne', 'Melbourne - Northern Region, VIC', 'northern')
+        for sort, valid in (('new-desc', True), (None, False), ('relevance', False)):
+            request = {'pageSize': 25, 'sortType': sort}
+            search = {'resolvedQuery': {'localities': [{'atlasId': 'northern', 'display': query.region}],
+                'metadata': {'savedSearchQuery': json.dumps(request)}},
+                'results': {'totalResultsCount': 0, 'pagination': {'maxPageNumberAvailable': 0, 'page': 1},
+                            'exact': {'items': []}}}
+            cache = {'1': {'data': json.dumps({'rentSearch': search})}}
+            exchange = {'resi-property_listing-experience-web': {'urqlClientCache': json.dumps(cache)}}
+            html = '<script>window.ArgonautExchange=' + json.dumps(exchange) + ';</script>'
+            if valid:
+                self.assertEqual(read_snapshot('realestate', html, query).total, 0)
+            else:
+                with self.assertRaises(SearchMetadataError):
+                    read_snapshot('realestate', html, query)
+
     def test_domain_exposes_search_window_cap_and_validates_price_filter(self):
         query = SearchQuery('domain', 'sydney')
         page = read_snapshot('domain', domain_html(), query)

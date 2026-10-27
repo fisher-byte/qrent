@@ -88,6 +88,9 @@ def read_snapshot(source, html, query, page=1):
             tag = soup.find('script', id='__NEXT_DATA__')
             data = json.loads(tag.string)['props']['pageProps']['componentProps']
             request = data['pageViewMetadata']['searchRequest']
+            ordering = request.get('sort') or {}
+            if ordering.get('sortKey') != 'DateUpdated' or ordering.get('direction') != 'Descending':
+                raise SearchMetadataError('Domain ignored newest-first ordering; incremental early stop is unsafe')
             locations = request['locations']
             state = 'NSW' if query.city == 'sydney' else 'VIC'
             expected = query.city.title() + ' Region'
@@ -105,6 +108,8 @@ def read_snapshot(source, html, query, page=1):
             if query.atlas_id and not any(item.get('atlasId') == query.atlas_id for item in localities):
                 raise SearchMetadataError('Real Estate resolved a different area')
             request = json.loads(resolved['metadata']['savedSearchQuery'])
+            if request.get('sortType') != 'new-desc':
+                raise SearchMetadataError('Real Estate ignored newest-first ordering; incremental early stop is unsafe')
             results = search['results']
             pagination = results['pagination']
             snapshot = SearchSnapshot(int(results['totalResultsCount']), int(pagination['maxPageNumberAvailable']),
