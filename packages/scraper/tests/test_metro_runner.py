@@ -89,6 +89,44 @@ def arguments(folder, source='domain', mode='full'):
 
 
 class MetroRunnerTests(unittest.TestCase):
+    def test_fresh_parent_total_can_validate_completed_partitions_without_rescanning_them(self):
+        root_total = 5
+        def spec(query, page):
+            if query.low is None:
+                return {'total': root_total, 'pages': 1, 'ids': ['A', 'B']}
+            return {'total': 2, 'pages': 1, 'ids': ['A', 'C'] if query.high is not None else ['B', 'D']}
+        with tempfile.TemporaryDirectory() as folder:
+            args, root = arguments(folder), SearchQuery('domain', 'sydney')
+            self.assertEqual(Harness(spec).run(args, [root])['exit_code'], 1)
+            state = json.loads((args.output / 'state.json').read_text())
+            self.assertEqual(state['queries'][root.key]['status'], 'failed')
+            self.assertTrue(all(state['queries'][k]['status'] == 'done' for k in state['queries'][root.key]['children']))
+            root_total = 4  # A fresh real response now agrees with the covered union.
+            resumed = Harness(spec)
+            result = resumed.run(args, [root])
+            self.assertEqual(result['exit_code'], 0)
+            self.assertEqual(len(resumed.visits), 1)
+            self.assertTrue(result['complete_inventory'])
+
+    def test_parent_refresh_does_not_hide_a_remaining_real_coverage_gap(self):
+        repair = False
+        def spec(query, page):
+            if query.low is None:
+                return {'total': 5, 'pages': 1, 'ids': ['A', 'B']}
+            if query.high is not None:
+                return {'total': 3, 'pages': 2, 'ids': ['A', 'C'] if page == 1 else ['E']} if repair else {
+                    'total': 2, 'pages': 1, 'ids': ['A', 'C']}
+            return {'total': 2, 'pages': 1, 'ids': ['B', 'D']}
+        with tempfile.TemporaryDirectory() as folder:
+            args, root = arguments(folder), SearchQuery('domain', 'sydney')
+            self.assertEqual(Harness(spec).run(args, [root])['exit_code'], 1)
+            repair = True
+            resumed = Harness(spec)
+            result = resumed.run(args, [root])
+            self.assertEqual(result['exit_code'], 0)
+            self.assertGreater(len(resumed.visits), 1)
+            self.assertEqual(result['listings'], 5)
+
     def test_failed_child_resume_preserves_completed_partitions_even_with_legacy_failed_root(self):
         failing = True
         def spec(query, page):

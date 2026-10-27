@@ -69,6 +69,14 @@ def unfinished_children(state, key):
     return False
 
 
+def covered_query_ids(state, key):
+    item = state['queries'][key]
+    result = set(item['ids'])
+    for child in item.get('children', []):
+        result.update(covered_query_ids(state, child))
+    return result
+
+
 def initial_state(args, mode, queries, store):
     columns = ('house_id', 'source', 'price_per_week', 'address_line1', 'suburb', 'state', 'postcode',
                'bedroom_count', 'bathroom_count', 'parking_count', 'property_type')
@@ -301,6 +309,14 @@ def capture(args):
                     logger.info('%s %s %s page %s: %s cards; paid wire %s',
                                 query.source, query.city, query.region or 'metro', page,
                                 len(props), budget.proxy_wire_bytes)
+                    # A market total can fall after all partitions finished. Verify
+                    # the parent again before paying to rewind every completed leaf.
+                    if (mode == 'full' and item.get('children') and not unfinished_children(state, key)
+                            and len(covered_query_ids(state, key)) >= min(item['first_total'], snapshot.total)):
+                        item.update(status='split', stop_reason='verified_parent_refresh')
+                        state['queue'].pop(0)
+                        checkpoint(args, state, budget)
+                        break
                     split = snapshot.truncated and (mode == 'full' or
                         (mode == 'incremental' and page >= snapshot.pages and item['unchanged_pages'] < args.known_pages))
                     if split:
@@ -400,17 +416,11 @@ def capture(args):
                 if (source, city) not in observed:
                     state['errors'].append({'source': source, 'city': city, 'error': 'No listings captured for required source/city'})
         if mode == 'full':
-            def covered_ids(key):
-                current = state['queries'][key]
-                ids = set(current['ids'])
-                for child in current.get('children', []):
-                    ids.update(covered_ids(child))
-                return ids
             state['coverage'] = []
             for key in state['options']['root_queries']:
                 item = state['queries'][key]
                 expected = min(item.get('first_total', 0), item.get('total', 0))
-                count = len(covered_ids(key))
+                count = len(covered_query_ids(state, key))
                 state['coverage'].append({'query': key, 'expected': expected, 'unique': count})
                 if count < expected and item['status'] in {'done', 'split'}:
                     if not unfinished_children(state, key):
