@@ -71,9 +71,13 @@ BROWSER_ENGINE=camoufox .venv/bin/python recovery_runner.py \
 
 Domain 的可选开源驱动是 [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright-python)（Apache-2.0）。安装 `requirements-fingerprint.txt` 后设置 `DOMAIN_BROWSER_ENGINE=patchright`，使用已安装 Chrome 或 `CHROMIUM_EXECUTABLE_PATH`。遵循项目推荐的持久化、headful、`no_viewport` 配置，保留真实浏览器的 UA、语言和窗口；生产是否通过另看恢复报告。Real Estate 继续使用 [Camoufox](https://github.com/daijro/camoufox)（MPL-2.0）。
 
+Real Estate 的初始 429 可能是自动 JS 校验：同一浏览器最多额外等待 40 秒，不主动刷新，最终状态和真实搜索元数据仍须通过。已启用目标主机的 `ips.js` 使用原浏览器 AU transport；其他公共 JS/CSS 继续普通下载，图片等不下载。
+
+零详情的日常增量会复用已验证 AU 浏览器。每个区域重新验证 AU；出口 IP 变化时重建匹配 GeoIP 的浏览器，并在每次翻页/重试前检查 20 分钟上限，早于供应商 30 分钟黏性期换会话。403/429 拒绝后仍重新验证新 AU 出口。全量路径不使用这项增量复用。
+
 `DOMAIN_NATIVE_NETWORK=true` 且 Domain 没有付费代理时，可设置 `DOMAIN_SEARCH_TRANSPORT=json`：先打开公开首页，在同一个浏览器会话里 GET 原搜索 URL，使用网站前端自身的 `Accept: application/json` 格式。直接校验真实返回的 `props` 中的地区、筛选、排序、分页和房源 ID，再解析 `listingsMap`；不合成 HTML 或搜索元数据。403、空响应和覆盖不足仍失败，详情页继续正常导航。默认 `navigation` 保留页面方式。都会区列表采集会跨价段复用 Domain 浏览器，失败续跑保留已完成叶查询，避免重新抓取整个分区树。
 
-Camoufox 的普通网络仍默认带有 uBlock Origin。对照实验可设置 `DOMAIN_CAMOUFOX_NO_UBO=true`；`DOMAIN_CAMOUFOX_PRESET_FILE` 指向私有的、从当前浏览器对应内置样本中选出的 JSON 字典，固定同一身份并使用主机 OS，不再覆盖其语言。两项只影响未代理的 Domain Camoufox，缺失或损坏的指定文件会失败；它们不保证目标站点不会限流。不要复制个人浏览器 Cookie 或账号 profile。
+Camoufox 默认带有 uBlock Origin。`DOMAIN_CAMOUFOX_NO_UBO=true` 与 `DOMAIN_CAMOUFOX_PRESET_FILE` 可指定私有的、从当前浏览器对应内置样本中选出的 JSON 字典，固定同一身份并使用主机 OS，不再覆盖其语言。Real Estate 对应设置为 `REALESTATE_CAMOUFOX_NO_UBO` / `REALESTATE_CAMOUFOX_PRESET_FILE`；其已验证 AU GeoIP 和省流路由继续保留。缺失或损坏的指定文件会失败；这些配置不保证目标站点不会限流。不要复制个人浏览器 Cookie 或账号 profile。
 
 异机补采只有在 Domain-only 全量和实际进程均成功、付费计数为零时，才能用 `ops/import_domain_capture.py` 校验导入。默认 dry-run，`--apply` 取得主任务锁后备份、upsert，并保持目标 partial；主 runner 仍须显式续跑核验，才能建立完整基线。
 代理会话设计参考取回的 Qrent 服务器 LycheeIP/gost 代码，当前连接来自 FlashProxy Residential Lite；千问配置私下复用本机 `pdftomd` 项目的 DashScope 密钥。不在仓库中保存凭据。
