@@ -17,7 +17,7 @@ from test_recovery import listing
 
 
 class Harness:
-    def __init__(self, spec, fail_pages=(), metadata_failures=0, navigation_failures=0):
+    def __init__(self, spec, fail_pages=(), metadata_failures=0, navigation_failures=0, navigation_status=403):
         self.spec, self.fail_pages = spec, set(fail_pages)
         self.visits, self.sessions, self.verified = [], [], []
         self.browser_geoips = []
@@ -25,6 +25,8 @@ class Harness:
         self.current = None
         self.metadata_failures = metadata_failures
         self.navigation_failures = navigation_failures
+        self.navigation_status = navigation_status
+        self.sleep_calls = []
 
     def browser_factory(self, source, **kwargs):
         harness = self
@@ -37,7 +39,7 @@ class Harness:
                 harness.visits.append(page)
                 if harness.navigation_failures:
                     harness.navigation_failures -= 1
-                    self._navigation_status = 403
+                    self._navigation_status = harness.navigation_status
                     return False
                 return page not in harness.fail_pages
             def get_page_source(self): return 'fixture'
@@ -78,7 +80,7 @@ class Harness:
              patch.object(runner, 'read_snapshot', side_effect=self.snapshot), \
              patch.dict(runner.FACTORIES, {'domain': self.scraper_factory, 'realestate': self.scraper_factory}), \
              patch.object(runner, 'verify_au_proxy', side_effect=self.verify), \
-             patch.object(runner.time, 'sleep'):
+             patch.object(runner.time, 'sleep', side_effect=self.sleep_calls.append):
             return runner.capture(args)
 
 
@@ -89,7 +91,7 @@ def arguments(folder, source='domain', mode='full'):
 
 
 class MetroRunnerTests(unittest.TestCase):
-    def test_realestate_403_retries_same_page_with_a_new_verified_au_session(self):
+    def test_realestate_block_retries_same_page_with_a_new_verified_au_session(self):
         harness = Harness(lambda query, page: {'total': 2, 'pages': 1, 'ids': ['A', 'B']}, navigation_failures=1)
         original_verify = harness.verify
         def verify(*args, **kwargs):
@@ -107,6 +109,19 @@ class MetroRunnerTests(unittest.TestCase):
             self.assertEqual(harness.verified, harness.sessions)
             self.assertEqual(len(set(harness.sessions)), 2)
             self.assertEqual(harness.browser_geoips, ['203.0.113.7', '203.0.113.8'])
+
+    def test_realestate_429_retries_in_a_new_au_session_after_bounded_backoff(self):
+        harness = Harness(lambda query, page: {'total': 2, 'pages': 1, 'ids': ['A', 'B']},
+                          navigation_failures=1, navigation_status=429)
+        with tempfile.TemporaryDirectory() as folder:
+            args = arguments(folder, source='realestate')
+            args.retries = 1
+            result = harness.run(args, [SearchQuery('realestate', 'sydney', 'Region', 'atlas')])
+            self.assertEqual(result['exit_code'], 0)
+            self.assertEqual(harness.visits, [1, 1])
+            self.assertEqual(len(set(harness.sessions)), 2)
+            self.assertEqual(result['proxy_failovers'][0]['after_http'], 429)
+            self.assertIn(30, harness.sleep_calls)
 
     def test_realestate_failover_never_navigates_with_an_unverified_exit(self):
         harness = Harness(lambda query, page: {'total': 2, 'pages': 1, 'ids': ['A', 'B']}, navigation_failures=1)

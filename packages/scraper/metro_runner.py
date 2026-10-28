@@ -261,15 +261,18 @@ def capture(args):
                         elif attempt == args.retries:
                             raise RuntimeError('Navigation failed or blocked')
                         elif ((query.source == 'domain' and getattr(browser, '_navigation_status', None) in {403, 429})
-                              or (query.source == 'realestate' and getattr(browser, '_navigation_status', None) == 403)):
+                              or (query.source == 'realestate' and getattr(browser, '_navigation_status', None) in {403, 429})):
                             logger.warning('%s rejected the session; retrying this page in a fresh verified browser', query.source)
+                            rejected_status = browser._navigation_status
                             browser.close()
                             shutil.rmtree(profile, ignore_errors=True)
+                            if rejected_status == 429:
+                                time.sleep(30)
                             if query.source == 'realestate':
                                 os.environ['PROXY_SESSION'] = uuid.uuid4().hex[:12]
                                 geoip_address = verify_realestate_exit(state, key, budget)
                                 state.setdefault('proxy_failovers', []).append({
-                                    'query': key, 'after_http': 403, **state['verified_sessions'][key]})
+                                    'query': key, 'after_http': rejected_status, **state['verified_sessions'][key]})
                             browser = BrowserManager(browser_type=BrowserType.PLAYWRIGHT,
                                 source=query.source, profile_dir=str(profile), geoip_address=geoip_address)
                             browser.create_driver()
