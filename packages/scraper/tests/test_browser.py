@@ -23,6 +23,42 @@ class Page:
 
 
 class BrowserTests(unittest.TestCase):
+    def test_realestate_waits_for_automatic_navigation_after_initial_429(self):
+        browser = BrowserManager(browser_type=BrowserType.PLAYWRIGHT, source='realestate')
+        page = MagicMock()
+        page.goto.return_value.status = 429
+        waited = []
+        def settle(milliseconds):
+            waited.append(milliseconds)
+            if sum(waited) >= 10000:
+                browser._navigation_status = 200
+        page.wait_for_timeout.side_effect = settle
+        browser._playwright_page = page
+        self.assertTrue(browser.navigate('https://www.realestate.com.au/rent/', wait_time=5))
+        page.goto.assert_called_once()
+        self.assertEqual(sum(waited), 10000)
+        page.wait_for_load_state.assert_called_once()
+
+    def test_automatic_429_wait_is_bounded_and_stops_when_budget_exhausted(self):
+        for exhausted, expected_polls in ((False, 8), (True, 0)):
+            browser = BrowserManager(browser_type=BrowserType.PLAYWRIGHT, source='realestate')
+            page = MagicMock()
+            page.goto.return_value.status = 429
+            browser._playwright_page = page
+            browser.network_policy = MagicMock()
+            browser.network_policy.budget.exhausted = exhausted
+            self.assertFalse(browser.navigate('https://www.realestate.com.au/rent/', wait_time=0))
+            self.assertEqual(page.wait_for_timeout.call_count, 1 + expected_polls)
+            page.goto.assert_called_once()
+
+    def test_domain_429_keeps_its_existing_failure_path(self):
+        browser = BrowserManager(browser_type=BrowserType.PLAYWRIGHT, source='domain')
+        page = MagicMock()
+        page.goto.return_value.status = 429
+        browser._playwright_page = page
+        self.assertFalse(browser.navigate('https://www.domain.com.au/', wait_time=0))
+        page.wait_for_timeout.assert_called_once_with(0)
+
     def test_domain_camoufox_can_keep_one_preset_without_ubo_or_locale_override(self):
         from camoufox import DefaultAddons
         context = MagicMock()

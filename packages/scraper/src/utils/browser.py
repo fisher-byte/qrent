@@ -352,6 +352,18 @@ class BrowserManager:
                 response = page.goto(url, timeout=60000, wait_until="domcontentloaded")
                 page.wait_for_timeout(int(wait_time * 1000))
                 status = self._navigation_status or (response.status if response is not None else 0)
+                if self.source == 'realestate' and status == 429:
+                    # A real AU response starts at 429, then its own JS reloads
+                    # the same search as 200 after about 9 seconds. Keep this
+                    # browser/session alive; no reload or extra request here.
+                    logger.info('Real Estate returned 429; waiting for automatic browser verification')
+                    for _ in range(8):
+                        if self.network_policy and self.network_policy.budget.exhausted:
+                            break
+                        page.wait_for_timeout(5000)
+                        status = self._navigation_status or status
+                        if status != 429:
+                            break
                 if status >= 400:
                     logger.error("HTTP %s loading %s", status, url)
                     return False
