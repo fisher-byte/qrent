@@ -341,6 +341,10 @@ class RealEstateScraper(BaseScraper):
                 properties.append(prop)
                 by_id[house_id] = prop
             prop = by_id[house_id]
+            quote = (item.get('price') or {}).get('display')
+            if isinstance(quote, str) and quote.strip():
+                prop.price_text = quote.strip()
+                prop.price_per_week = extract_price(prop.price_text)
             for name in ('suburb', 'state', 'postcode'):
                 if address.get(name):
                     setattr(prop, name, str(address[name]))
@@ -743,7 +747,7 @@ class RealEstateScraper(BaseScraper):
                             property_data.thumbnail_url = url
                             break
         
-        property_data.published_at = datetime.now()
+        # A fetch timestamp is not evidence of the source publication date.
         
         return property_data
     

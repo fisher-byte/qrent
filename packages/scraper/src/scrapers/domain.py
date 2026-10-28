@@ -215,6 +215,10 @@ class DomainScraper(BaseScraper):
                 properties.append(prop)
                 by_id[house_id] = prop
             prop = by_id[house_id]
+            quote = model.get('price')
+            if isinstance(quote, str) and quote.strip():
+                prop.price_text = quote.strip()
+                prop.price_per_week = extract_price(prop.price_text)
             for name in ('suburb', 'state', 'postcode'):
                 if address.get(name):
                     value = str(address[name])
@@ -419,8 +423,7 @@ class DomainScraper(BaseScraper):
             thumbnail_url = self._parse_thumbnail(soup)
             property_data.thumbnail_url = thumbnail_url
         
-        # 发布时间
-        property_data.published_at = datetime.now()
+        # Keep publication unknown unless it was supplied by the source.
         
         return property_data
     

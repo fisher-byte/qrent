@@ -151,7 +151,8 @@ def source_payloads(database, state):
             require(row is not None, 'Source seen listing is missing from SQLite')
             data = json.loads(row[1])
             require(isinstance(data, dict) and set(FIELDS) <= data.keys(), 'Incomplete enrichment payload schema')
-            require(set(data) <= set(FIELDS) | {'average_score', 'scores', 'commute_times'}, 'Unsupported enrichment fields')
+            require(set(data) <= set(FIELDS) | {'average_score', 'scores', 'commute_times', 'price_text'}, 'Unsupported enrichment fields')
+            require(isinstance(data.get('price_text', ''), str), 'Unsupported source price quote')
             require(source == 'domain' and data['source'] == 'domain' and data['house_id'] == house_id
                     and data['state'] == row[0] == CITY_STATES[city]
                     and data.get('city', city) == city, 'Source payload identity or city/state mismatch')

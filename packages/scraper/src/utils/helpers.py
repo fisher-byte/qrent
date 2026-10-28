@@ -38,16 +38,18 @@ def safe_str(val: Any, default: str = '') -> str:
 
 
 def safe_datetime(val: Any, default: Optional[datetime] = None) -> Optional[datetime]:
-    """安全转换为日期时间"""
-    if val is None or (isinstance(val, float) and pd.isna(val)) or val == '':
-        return default or datetime.now()
-    
+    """Parse known dates without inventing a timestamp for missing data."""
     try:
+        if val is None or pd.isna(val):
+            return default
         if isinstance(val, datetime):
             return val
-        
         val_str = str(val).strip()
         if val_str:
+            try:
+                return datetime.fromisoformat(val_str[:-1] + '+00:00' if val_str.endswith('Z') else val_str)
+            except ValueError:
+                pass
             formats = [
                 '%Y-%m-%d %H:%M:%S',
                 '%Y-%m-%d',
@@ -67,23 +69,57 @@ def safe_datetime(val: Any, default: Optional[datetime] = None) -> Optional[date
     except Exception:
         pass
     
-    return default or datetime.now()
+    return default
 
 
 def extract_price(price_str: str) -> int:
-    """从字符串中提取价格"""
-    if not price_str:
+    """Return an unambiguous whole weekly amount; 0 means unknown."""
+    if price_str is None:
         return 0
-    
-    try:
-        # 移除货币符号、逗号等
-        cleaned = re.sub(r'[^\d.]', '', str(price_str))
-        if cleaned:
-            return int(float(cleaned))
-    except (ValueError, TypeError):
-        pass
-    
-    return 0
+    text = str(price_str).strip().lower()
+    amounts = list(re.finditer(
+        r'(?<![\w.,])(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?![\d.,])', text))
+    if not 1 <= len(amounts) <= 2 or re.search(r'(?<!\w)[-−]\s*\$?\s*\d', text):
+        return 0
+    periods = {
+        'week': r'(?:per|a)\s*(?:week|wk)|weekly|p\.?\s*w\.?|p/w|/\s*(?:week|wk|w)',
+        'month': r'(?:per|a)\s*(?:calendar\s+)?month|monthly|p\.?\s*c\.?\s*m\.?|p\.?\s*m\.?|p/m|/\s*(?:month|mth|mo|m)',
+        'day': r'(?:per|a)\s*(?:day|night)|daily|nightly|p\.?\s*d\.?|p/d|/\s*(?:day|night|d)',
+        'year': r'(?:per|a)\s*(?:calendar\s+)?(?:year|annum)|yearly|annual(?:ly)?|p\.?\s*a\.?|p/a|/\s*(?:year|yr|y)',
+        'other': r'fortnight(?:ly)?|(?:per|an?)\s*hour|hourly|p\.?\s*f\.?',
+    }
+
+    def units(segment):
+        return {name for name, pattern in periods.items()
+                if re.search(r'(?<![a-z])(?:' + pattern + r')(?![a-z])', segment)}
+
+    # Reject partial numeric tokens such as scientific notation or typos, while
+    # still supporting the common compact forms "$530pw" and "$2,303pcm".
+    for amount in amounts:
+        suffix = text[amount.end():]
+        if suffix[:1].isalpha() and not any(
+                re.match(r'(?:' + pattern + r')(?![a-z])', suffix) for pattern in periods.values()):
+            return 0
+    if len(amounts) == 1:
+        if units(text) - {'week'}:
+            return 0
+        amount = amounts[0]
+    else:
+        between = text[amounts[0].end():amounts[1].start()]
+        if (re.search(r'[-–—+]|\b(?:to|plus)\b', between)
+                or not re.search(r'[/(),=]|\bor\b', between)):
+            return 0
+        # Only the explicit weekly/monthly rendering of the same quote is
+        # supported. Ranges, multiple weekly prices and unlabelled fees remain
+        # unknown rather than becoming an invented scalar price.
+        first_units = units(between)
+        second_units = units(text[amounts[1].end():])
+        if ({frozenset(first_units), frozenset(second_units)}
+                != {frozenset({'week'}), frozenset({'month'})}):
+            return 0
+        amount = amounts[0] if first_units == {'week'} else amounts[1]
+    whole, _, fraction = amount.group().replace(',', '').partition('.')
+    return int(whole) if not fraction.strip('0') else 0
 
 
 def extract_number(text: str) -> int:
@@ -130,7 +166,9 @@ def parse_available_date(date_text: str) -> Optional[datetime]:
     
     date_text = str(date_text).strip()
     
-    if "Available Now" in date_text or "now" in date_text.lower():
+    if re.fullmatch(
+            r'(?:(?:available(?:\s+from)?(?:\s+|\s*[:-]\s*))?(?:now|immediately)'
+            r'|(?:now|immediately)\s+available)[.!]?', date_text, re.I):
         return datetime.now()
     
     date_text = re.sub(r'^available(?:\s+from)?\s*', '', date_text, flags=re.I).strip()

@@ -74,12 +74,17 @@ def safe_str(val, default=""):
 
 
 def safe_datetime(val, default=None):
-    if val is None or pd.isna(val) or val == "":
-        return default or datetime.now()
+    """Preserve valid source dates and leave missing or invalid dates unknown."""
     try:
+        if val is None or pd.isna(val):
+            return default
         if isinstance(val, datetime):
             return val
         val_str = str(val).strip()
+        try:
+            return datetime.fromisoformat(val_str[:-1] + "+00:00" if val_str.endswith("Z") else val_str)
+        except ValueError:
+            pass
         for fmt in [
             "%Y-%m-%d %H:%M:%S",
             "%Y-%m-%d",
@@ -96,7 +101,7 @@ def safe_datetime(val, default=None):
                 continue
     except Exception:
         pass
-    return default or datetime.now()
+    return default
 
 
 def normalize_region(value: str) -> str:
@@ -288,7 +293,7 @@ def import_dataframe(df: pd.DataFrame, school_name: str) -> Tuple[int, int]:
                 elif "date_published" in df.columns:
                     published_at = safe_datetime(row.get("date_published"))
                 else:
-                    published_at = datetime.now()
+                    published_at = None
 
                 if house_id in existing:
                     update_sql = """

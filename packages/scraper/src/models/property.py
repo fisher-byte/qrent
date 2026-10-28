@@ -64,6 +64,9 @@ class PropertyData:
     
     # Commute time (minutes)
     commute_times: Dict[str, Optional[int]] = field(default_factory=dict)
+
+    # Preserve the source quote when a range or non-weekly amount has no scalar.
+    price_text: str = ""
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""

@@ -16,10 +16,11 @@ from datetime import datetime
 from pathlib import Path
 
 from recovery_runner import verify_au_proxy
+from src.models import PropertyData
 from src.scrapers import DomainScraper, RealEstateScraper
 from src.services.incremental import complete_postcodes, reuse_details
 from src.services.search_plan import SearchQuery, SearchMetadataError, metro_queries, read_snapshot
-from src.services.sqlite_store import SQLiteStore
+from src.services.sqlite_store import SQLiteStore, read_payload
 from src.utils.browser import BrowserManager, BrowserType
 from src.utils.network import TrafficBudget, set_run_budget
 
@@ -36,9 +37,10 @@ def atomic_json(path, value):
 
 
 def signature(value):
-    fields = ('price_per_week', 'address_line1', 'suburb', 'state', 'postcode',
+    fields = ('price_per_week', 'price_text', 'address_line1', 'suburb', 'state', 'postcode',
               'bedroom_count', 'bathroom_count', 'parking_count', 'property_type')
-    return hashlib.sha256(json.dumps([value.get(k) for k in fields], default=str).encode()).hexdigest()
+    values = [(value.get(k) or '') if k == 'price_text' else value.get(k) for k in fields]
+    return hashlib.sha256(json.dumps(values, default=str).encode()).hexdigest()
 
 
 def restore_budget(saved, max_requests, max_bytes):
@@ -90,8 +92,11 @@ def initial_state(args, mode, queries, store):
     columns = ('house_id', 'source', 'price_per_week', 'address_line1', 'suburb', 'state', 'postcode',
                'bedroom_count', 'bathroom_count', 'parking_count', 'property_type')
     initial = {}
-    for row in store.connection.execute('SELECT ' + ','.join(columns) + ' FROM properties'):
-        data = dict(zip(columns, row))
+    sql = ('SELECT ' + ','.join('p.' + name for name in columns) + ', e.payload FROM properties p '
+           'LEFT JOIN property_enrichment e ON p.house_id=e.house_id AND p.source=e.source')
+    for row in store.connection.execute(sql):
+        data = dict(zip(columns, row[:-1]))
+        data['price_text'] = read_payload(row[-1], data['house_id'], data['source']).get('price_text', '')
         initial[f"{data['source']}:{data['house_id']}"] = signature(data)
     return {
         'version': 1, 'mode': mode, 'status': 'running', 'exit_code': None,
@@ -143,7 +148,8 @@ def export_rows(args, state, store):
             stats['unknown_price'] += not bool(data.get('price_per_week'))
             if name not in streams:
                 streams[name] = gzip.open(args.output / (name + '.csv.gz'), 'wt', encoding='utf-8-sig', newline='')
-                writers[name] = csv.DictWriter(streams[name], fieldnames=list(data))
+                # Older persisted rows may predate fields added to PropertyData.
+                writers[name] = csv.DictWriter(streams[name], fieldnames=list(PropertyData.__dataclass_fields__))
                 writers[name].writeheader()
             writers[name].writerow(data)
     finally:

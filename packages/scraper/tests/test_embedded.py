@@ -7,6 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.scrapers.realestate import RealEstateScraper
 from src.scrapers.domain import DomainScraper
+from src.models import PropertyData, PropertySource
 
 
 def listing_html(items):
@@ -32,6 +33,15 @@ def embedded_listing(house_id='456'):
 
 
 class EmbeddedListingTests(unittest.TestCase):
+    def test_detail_fetch_never_invents_or_replaces_source_publication_date(self):
+        for scraper, source in ((RealEstateScraper(), PropertySource.REALESTATE),
+                                (DomainScraper(), PropertySource.DOMAIN)):
+            for published in (None, datetime(2026, 5, 13)):
+                with self.subTest(source=source, published=published):
+                    prop = PropertyData(house_id='123', source=source, published_at=published)
+                    result = scraper.parse_detail_page(prop, '<html><body>No source publication date</body></html>')
+                    self.assertEqual(result.published_at, published)
+
     def test_domain_embedded_card_retains_unit_state_and_search_id_scope(self):
         model = {'url': '/2-10-example-street-carlton-vic-3053-123', 'price': 'Contact agent',
                  'address': {'street': '2/10 Example Street', 'suburb': 'Carlton', 'state': 'VIC', 'postcode': '3053'},
@@ -61,6 +71,27 @@ class EmbeddedListingTests(unittest.TestCase):
         self.assertEqual(prop.available_date, datetime(2026, 11, 18))
         self.assertEqual(prop.thumbnail_url, 'https://i2.au.reastatic.net/800x600/abc/image.jpg')
         self.assertEqual(prop.price_per_week, 600)
+
+    def test_raw_quotes_survive_ambiguous_and_dual_period_prices(self):
+        for quote, weekly in (('$800 - $880 per week', 0), ('$530 pw / $2,303 pcm', 530)):
+            with self.subTest(source='realestate', quote=quote):
+                item = embedded_listing()
+                item['price']['display'] = quote
+                prop = RealEstateScraper().parse_listing_page(listing_html([item]))[0]
+                self.assertEqual(prop.price_per_week, weekly)
+                self.assertEqual(prop.price_text, quote)
+                self.assertIsNone(prop.published_at)
+            with self.subTest(source='domain', quote=quote):
+                model = {'url': '/2-10-example-street-carlton-vic-3053-123', 'price': quote,
+                         'address': {'street': '2/10 Example Street', 'suburb': 'Carlton',
+                                     'state': 'VIC', 'postcode': '3053'}}
+                data = {'props': {'pageProps': {'componentProps': {
+                    'listingSearchResultIds': [123], 'listingsMap': {'123': {'listingModel': model}}}}}}
+                html = '<script id="__NEXT_DATA__">' + json.dumps(data) + '</script>'
+                prop = DomainScraper().parse_listing_page(html)[0]
+                self.assertEqual(prop.price_per_week, weekly)
+                self.assertEqual(prop.price_text, quote)
+                self.assertIsNone(prop.published_at)
 
     def test_unknown_price_and_full_description_are_preserved(self):
         item = embedded_listing()

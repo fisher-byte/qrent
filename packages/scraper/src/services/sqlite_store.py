@@ -96,7 +96,7 @@ class SQLiteStore:
         result = []
         cutoff = datetime.now().timestamp() - days * 86400
         columns = ','.join('p.' + name for name in FIELDS)
-        allowed = set(FIELDS) | {'average_score', 'scores', 'commute_times'}
+        allowed = set(FIELDS) | {'average_score', 'scores', 'commute_times', 'price_text'}
         for row in self.connection.execute(
                 f"SELECT {columns},e.payload FROM properties p LEFT JOIN property_enrichment e "
                 "ON p.house_id=e.house_id AND p.source=e.source"):

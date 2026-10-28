@@ -1,3 +1,5 @@
+import csv
+import gzip
 import json
 import os
 import re
@@ -66,6 +68,7 @@ class Harness:
                 return [listing(PropertySource(query.source), house_id=house_id, state='NSW', postcode='2000',
                                 description_en='Complete' if data.get('described', True) else None,
                                 thumbnail_url='https://cdn.example/a.jpg',
+                                price_text=data.get('price_text', ''),
                                 available_date=datetime(2026, 11, 18))
                         for house_id in data['ids']]
             def scrape_property_details(self, props, **kwargs):
@@ -93,6 +96,53 @@ def arguments(folder, source='domain', mode='full'):
 
 
 class MetroRunnerTests(unittest.TestCase):
+    def test_incremental_tracks_source_quote_changes(self):
+        queries = [SearchQuery('domain', 'sydney')]
+        with tempfile.TemporaryDirectory() as folder:
+            args = arguments(folder)
+            def spec(query, page):
+                return {'total': 10, 'pages': 5, 'ids': [str(2*page-1), str(2*page)],
+                        'price_text': '$800 - $880 per week'}
+            self.assertEqual(Harness(spec).run(args, queries)['exit_code'], 0)
+            args.mode, args.output = 'incremental', Path(folder) / 'incremental-known'
+            known = Harness(spec)
+            self.assertEqual(known.run(args, queries)['exit_code'], 0)
+            self.assertEqual(known.visits, [1, 2, 3])
+            def changed_spec(query, page):
+                data = spec(query, page)
+                if page == 1:
+                    data['price_text'] = '$900 - $950 per week'
+                return data
+            args.output = Path(folder) / 'incremental-changed'
+            changed = Harness(changed_spec)
+            self.assertEqual(changed.run(args, queries)['exit_code'], 0)
+            self.assertEqual(changed.visits, [1, 2, 3, 4])
+
+    def test_export_mixed_old_and_new_payloads_preserves_raw_quotes(self):
+        for old_first in (True, False):
+            with self.subTest(old_first=old_first), tempfile.TemporaryDirectory() as folder:
+                args = arguments(folder)
+                args.output.mkdir()
+                store = runner.SQLiteStore(args.db)
+                old = listing(house_id='old').to_dict()
+                old.pop('price_text', None)
+                new = listing(house_id='new').to_dict()
+                new['price_text'] = '$800 - $880 per week'
+                payloads = [old, new] if old_first else [new, old]
+                with store.connection:
+                    for payload in payloads:
+                        store.connection.execute('INSERT INTO property_enrichment VALUES (?,?,?)',
+                            (payload['house_id'], 'domain', json.dumps(payload, default=str)))
+                state = {'seen': {'domain:old': ['domain', 'sydney'], 'domain:new': ['domain', 'sydney']}}
+                try:
+                    runner.export_rows(args, state, store)
+                finally:
+                    store.connection.close()
+                with gzip.open(args.output / 'domain_sydney.csv.gz', 'rt', encoding='utf-8-sig') as stream:
+                    rows = {row['house_id']: row for row in csv.DictReader(stream)}
+                self.assertEqual(rows['old']['price_text'], '')
+                self.assertEqual(rows['new']['price_text'], new['price_text'])
+
     def test_production_daily_entrypoint_arguments_parse_with_bounded_retries(self):
         script = (Path(runner.__file__).parent / 'ops/run_metro.sh').read_text()
         command_arguments = script.split('metro_runner.py', 1)[1].split('2>&1', 1)[0].replace('\\\n', ' ')
