@@ -17,7 +17,9 @@
 
 当前腾讯云账户的 CVM 清单只有广州爬虫机；轻量清单只有香港 relay。已通过 SSH 检查两台，未发现官网 backend/MySQL。广州机 nginx 服务 `qrent.com.cn` 的静态工具页，不是 `www.qrent.rent` 的前端。当前 DNSPod 管理的 Qrent 域名也是 `qrent.com.cn`。
 
-GitHub 的前端 Preview 部署记录指向 Vercel `wiperis-projects/qrent-frontend`。仓库 README 默认让前端连接既有 `api.qrent.rent`。这些线索不能单独证明线上后端的归属或地址；需要取得既有部署的实际环境配置。目前未登录 Vercel、未读取其私有配置，未改 DNS 或官网数据库。
+GitHub 的前端 Preview 部署记录指向 Vercel `wiperis-projects/qrent-frontend`；2026-07-08 最近一次 Vercel Production 成功记录也指向该团队（deployment `5356170772`）。仓库 README 默认让前端连接既有 `api.qrent.rent`。这些线索不能单独证明线上后端的归属或地址；需要取得既有部署的实际环境配置。
+
+已使用用户授权的 Google 账号登录，Vercel 身份为 `fisher-byte`。团队列表只显示 `Leon's projects`，项目列表只有两个 `5545-project` 项目；直接访问 `https://vercel.com/wiperis-projects/qrent-frontend` 返回已登录状态的 404。原项目可能不可见或地址已经变更，目前没有读到其私有配置。已请求有原官网权限的账号或后端部署连接位置；未发送访问申请、未改 DNS 或官网数据库。
 
 ## 当前采集候选
 
@@ -58,3 +60,11 @@ GitHub 的前端 Preview 部署记录指向 Vercel `wiperis-projects/qrent-front
 后续必须先只读核对官网实际 schema、学校关联、缓存和部署版本，再备份并实施幂等同步。未知发布时间、价格、评分和通勤必须在 API 与卡片中有明确的未知状态；不能用今天或零值绕过旧数据库及 UI 限制。
 
 本机原始证据保存在被 Git 忽略的 `packages/scraper/output/website-sync-audit-20261028/online-before.json` 和 `inventory-audit.json`。只读库存检查时间为 `2026-10-28T05:14:49Z`。
+
+## 修复后的实时小样本
+
+13:22–13:25 CST 用独立 SQLite 测试库执行两站、两城各两页，实际进程退出 `0`，`pilot_success`，8 页 / 180 个来源 ID，错误 0，`complete_inventory=false`：Domain 悉尼 40 / 墨尔本 40，Real Estate 悉尼 50 / 墨尔本 50。
+
+180 条均保存非空原始报价，报价与周租标量按解析规则一致，来源 URL 的站点与 source 一致；来源发布时间均保持未知。78 条有明确未来可入住日期，76 条可入住日期缺失，均不回填成今天。本次小样本不是全部历史记录的修复验收。
+
+付费中继传输 `1,453,492 bytes`，仅包含 Real Estate 与 AU 出口检查，Domain 付费流量为 0；125 次公共缓存命中，避免重复的解码响应体 `15,469,906 bytes`。未新增购买；传输计数不是供应商独立账单。原始退出码、结果与字段验收已取回 `output/website-sync-audit-20261028/integrity-pilot/`。测试库没有写入官网或主采集库。
