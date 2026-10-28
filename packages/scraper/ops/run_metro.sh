@@ -11,5 +11,5 @@ export SCRAPER_ENV_FILE="$qrent_release/.env"
 timeout --kill-after=30s 18h xvfb-run -a .venv/bin/python metro_runner.py \
     --mode auto --cities sydney melbourne --scrapers domain realestate \
     --db "$qrent_root/properties.db" --output "$qrent_output" \
-    --proxy-bytes 300000000 --max-requests 500000 --detail-limit 0 \
+    --proxy-bytes 300000000 --max-requests 500000 --detail-limit 0 --retries 3 \
     2>&1 | tee -a "$qrent_root/logs/metro-$(date +%Y%m%d).log"

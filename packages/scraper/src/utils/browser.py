@@ -184,18 +184,18 @@ class BrowserManager:
                     headless=use_headless, proxy=proxy,
                     geoip=(self.geoip_address or True) if proxy else False, enable_cache=True,
                     locale='en-AU', service_workers='allow' if native_domain else 'block')
-                if native_domain:
-                    if os.getenv('DOMAIN_CAMOUFOX_NO_UBO', '').lower() == 'true':
-                        from camoufox import DefaultAddons
-                        camoufox_options['exclude_addons'] = [DefaultAddons.UBO]
-                    preset_path = os.getenv('DOMAIN_CAMOUFOX_PRESET_FILE')
-                    if preset_path:
-                        preset = json.loads(Path(preset_path).read_text())
-                        if not isinstance(preset, dict) or not preset:
-                            raise ValueError('Domain Camoufox preset must be a nonempty JSON object')
-                        camoufox_options.update(fingerprint_preset=preset,
-                            os={'Darwin': 'macos', 'Windows': 'windows'}.get(platform.system(), 'linux'))
-                        camoufox_options.pop('locale')
+                preset_prefix = self.source.upper() + '_CAMOUFOX_'
+                if os.getenv(preset_prefix + 'NO_UBO', '').lower() == 'true':
+                    from camoufox import DefaultAddons
+                    camoufox_options['exclude_addons'] = [DefaultAddons.UBO]
+                preset_path = os.getenv(preset_prefix + 'PRESET_FILE')
+                if preset_path:
+                    preset = json.loads(Path(preset_path).read_text())
+                    if not isinstance(preset, dict) or not preset:
+                        raise ValueError(self.source + ' Camoufox preset must be a nonempty JSON object')
+                    camoufox_options.update(fingerprint_preset=preset,
+                        os={'Darwin': 'macos', 'Windows': 'windows'}.get(platform.system(), 'linux'))
+                    camoufox_options.pop('locale')
                 self._camoufox_manager = Camoufox(**camoufox_options)
                 self._playwright_context = self._camoufox_manager.__enter__()
             elif engine == 'patchright':

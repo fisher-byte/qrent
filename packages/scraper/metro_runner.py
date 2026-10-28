@@ -544,7 +544,7 @@ def build_parser():
     parser.add_argument('--pilot-pages', type=int, default=3)
     parser.add_argument('--pilot-regions', type=int, default=3)
     parser.add_argument('--known-pages', type=int, default=3)
-    parser.add_argument('--retries', type=int, choices=[0, 1], default=1)
+    parser.add_argument('--retries', type=int, choices=range(4), default=1)
     parser.add_argument('--delay', type=float, default=2)
     parser.add_argument('--detail-limit', type=int, default=8)
     parser.add_argument('--details-per-query', type=int, default=1)

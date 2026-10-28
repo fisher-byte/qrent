@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shlex
 import sys
 import tempfile
 import unittest
@@ -92,6 +93,16 @@ def arguments(folder, source='domain', mode='full'):
 
 
 class MetroRunnerTests(unittest.TestCase):
+    def test_production_daily_entrypoint_arguments_parse_with_bounded_retries(self):
+        script = (Path(runner.__file__).parent / 'ops/run_metro.sh').read_text()
+        command_arguments = script.split('metro_runner.py', 1)[1].split('2>&1', 1)[0].replace('\\\n', ' ')
+        parsed = runner.build_parser().parse_args(shlex.split(command_arguments))
+        self.assertEqual(parsed.mode, 'auto')
+        self.assertEqual(parsed.cities, ['sydney', 'melbourne'])
+        self.assertEqual(parsed.scrapers, ['domain', 'realestate'])
+        self.assertEqual(parsed.retries, 3)
+        self.assertEqual(parsed.proxy_bytes, 300000000)
+
     def test_incremental_realestate_reuses_a_verified_browser_between_regions(self):
         queries = [SearchQuery('realestate', 'sydney', name, name) for name in ('One', 'Two')]
         spec = lambda query, page: {'total': 2, 'pages': 1, 'ids': ['A', 'B']}

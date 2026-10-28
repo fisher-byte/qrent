@@ -23,6 +23,35 @@ class Page:
 
 
 class BrowserTests(unittest.TestCase):
+    def test_realestate_fixed_preset_keeps_verified_au_geoip_and_metered_routing(self):
+        from camoufox import DefaultAddons
+        context = MagicMock()
+        context.pages = [MagicMock()]
+        with tempfile.TemporaryDirectory() as folder:
+            preset_path = Path(folder) / 'preset.json'
+            preset = {'navigator': {'userAgent': 'Firefox Linux fixture'}}
+            preset_path.write_text(json.dumps(preset))
+            with patch.dict(os.environ, {'BROWSER_ENGINE': 'camoufox',
+                'REALESTATE_CAMOUFOX_NO_UBO': 'true', 'REALESTATE_CAMOUFOX_PRESET_FILE': str(preset_path)}, clear=True), \
+                    patch('src.utils.browser.ProxyPool.config', return_value={'server': 'http://127.0.0.1:9'}), \
+                    patch('src.utils.browser.EgressProxy'), \
+                    patch('camoufox.sync_api.Camoufox') as camoufox, \
+                    patch('src.utils.browser.time.sleep'):
+                camoufox.return_value.__enter__.return_value = context
+                browser = BrowserManager(browser_type=BrowserType.PLAYWRIGHT, source='realestate',
+                    profile_dir=str(Path(folder) / 'profile'), geoip_address='203.0.113.7')
+                try:
+                    browser.create_driver()
+                    config = camoufox.call_args.kwargs
+                    self.assertEqual(config['fingerprint_preset'], preset)
+                    self.assertEqual(config['exclude_addons'], [DefaultAddons.UBO])
+                    self.assertNotIn('locale', config)
+                    self.assertEqual(config['geoip'], '203.0.113.7')
+                    self.assertTrue(browser.network_policy.proxied)
+                    context.route.assert_called_once()
+                finally:
+                    browser.close()
+
     def test_realestate_waits_for_automatic_navigation_after_initial_429(self):
         browser = BrowserManager(browser_type=BrowserType.PLAYWRIGHT, source='realestate')
         page = MagicMock()
