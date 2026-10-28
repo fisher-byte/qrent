@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+Current execution rules and production evidence are maintained in [AGENTS.md](AGENTS.md). This file remains a compatibility entry and historical architecture reference.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Notice

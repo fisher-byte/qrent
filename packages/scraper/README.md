@@ -32,7 +32,7 @@ A modular collector for Australian rental listings from Domain and Real Estate. 
 - `remote_capture.py start --resume` 只在旧进程确已终止后续跑。断点绑定区域配置、规划版本和根查询集合，范围改变时拒绝沿用。
 - `ops/run_metro.sh` 供现有每日 02:00 任务调用；`auto` 在缺少有效全量基线或基线超过 7 天时全量刷新，其他日期做增量采集。未完成全量不建立基线；未扫描和失败的数据不自动下架。
 - 两站的最新优先排序从页面元数据校验，缺失或不匹配时拒绝增量早停；Real Estate 旧房源的全部字段变化由每周全量覆盖。
-- 本轮代理累计购买上限为 USD 1.50，包含已购买的 USD 0.30 一次性额度，无自动续费。所有传输统计必须同时对照供应商实际扣量；最终数字见恢复报告。
+- 本轮代理累计购买上限为 USD 1.50；供应商两张已付发票合计 USD 0.60 / 2GB，无自动续费。所有传输统计必须同时对照供应商实际扣量；最终数字见恢复报告。
 
 ## 原流水线与月度预算
 
@@ -40,13 +40,15 @@ A modular collector for Australian rental listings from Domain and Real Estate. 
 
 所有正式运行必须复用同一份持久化 `--state` SQLite 账本；它保存模型输入缓存、规范化地址与学校路线、月度请求和金额。独占锁拒绝重叠运行；已成功结果不会因普通重跑或新月份重新调用。该文件必须连同采集库备份，禁止换空账本绕过已用额度。
 
+正式账本已集中到 `qrent-prod:/root/qrent-scraper/enrichment/state.db`，本地旧文件只作历史验证快照，本地提供商 Key 已置空。服务器 Maps 独立走 `socks5h://127.0.0.1:18082`，服务 `qrent-maps-egress.service` 使用既有 SSH 连接到香港普通网络；不要使用旧 18080 的 LycheeIP 住宅代理。后续 API 作业只在正式账本所在主机运行，旧评分/通勤脚本不得用于绕过闸值。
+
 月度金额最多 USD 5（`QRENT_MONTHLY_USD_LIMIT` 只能调低），请求前预留、成功后按 tokens 结算；代理采购通过 `EnrichmentState.record_expense` 按唯一购买回执登记，预付流量消耗不重复登记。历史费用在启用前登记。Google 的每月免费量按真实结算账号汇总，多 Key 不扩充额度。
 
 地图可复用 `GOOGLE_MAPS_API_KEY`，`GOOGLE_MAPS_API_MODE=routes` 使用当前 Routes API；旧已启用账号可指定 `legacy`。`GOOGLE_MAPS_POOL_FILE` 可指向私有 JSON 列表，每项包含 `api_key`、真实共用的 `billing_group`、`provider`，可带 `monthly_limit`（默认及最大 9500）。只请求公交时长，不在没有路线时伪造驾驶乘数。`GOOGLE_MAPS_HTTP_PROXY` 可指定独立普通出口；不继承住宅代理环境变量。密钥文件不进入 Git。
 
 原表学校代码包含 `UNSW/USYD/UTS/UNIMELB/UNIMELB_SOUTHBANK/MONASH/MONASH_CAULFIELD`。完整描述与模型回执留本地；原库描述列长度保持不变。未知价格、评分、通勤的记录不发布；来源发布时间与原写库采集时间的语义见 [当前报告](../../docs/reports/2026-10-29-enrichment-recovery.md)。
 
-两站两城 4 条完整记录、14 条真实路线、缓存重跑及原表 DML / API 已通过小样本验收，尚未接到每日自动发布。低价 API 与首次/日常费用边界见 [采购候选](../../docs/reports/2026-10-29-commute-api-options.md)。不要把此处说明当作全量已同步。
+两站两城 4 条完整记录、14 条真实路线、缓存重跑及原表 DML / API / 实际卡片已通过小样本验收；补充源码已经 SSH 部署并通过 179 项服务器检查。尚未接到每日自动发布，爬虫机未安装 root 数据库凭据。低价 API 与首次/日常费用边界见 [采购候选](../../docs/reports/2026-10-29-commute-api-options.md)。不要把此处说明当作全量已同步。
 
 ### 原采集恢复入口
 
