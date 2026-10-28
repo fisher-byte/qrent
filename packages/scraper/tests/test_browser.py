@@ -59,6 +59,21 @@ class BrowserTests(unittest.TestCase):
         self.assertFalse(browser.navigate('https://www.domain.com.au/', wait_time=0))
         page.wait_for_timeout.assert_called_once_with(0)
 
+    def test_final_rejection_after_automatic_redirect_still_fails(self):
+        browser = BrowserManager(browser_type=BrowserType.PLAYWRIGHT, source='realestate')
+        page = MagicMock()
+        page.goto.return_value.status = 429
+        def redirect(milliseconds):
+            if milliseconds:
+                browser._navigation_status = 302
+        def final_document(*args, **kwargs):
+            browser._navigation_status = 403
+        page.wait_for_timeout.side_effect = redirect
+        page.wait_for_load_state.side_effect = final_document
+        browser._playwright_page = page
+        self.assertFalse(browser.navigate('https://www.realestate.com.au/rent/', wait_time=0))
+        page.goto.assert_called_once()
+
     def test_domain_camoufox_can_keep_one_preset_without_ubo_or_locale_override(self):
         from camoufox import DefaultAddons
         context = MagicMock()

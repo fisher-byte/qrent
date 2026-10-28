@@ -33,13 +33,32 @@ class NetworkTests(unittest.TestCase):
 
     def test_same_origin_scripts_are_direct_but_documents_and_validation_stay_proxied(self):
         from src.utils.network import resource_route
-        for path in ("/static/js/app.js", "/challenge/session/ips.js"):
-            self.assertEqual(resource_route("https://www.realestate.com.au" + path, "script"), "direct")
+        self.assertEqual(resource_route("https://www.realestate.com.au/static/js/app.js", "script"), "direct")
+        for path in ("/challenge/session/ips.js", "/opaque/session/ips.js?KP_UIDz=fixture&x-kpsdk-im=fixture"):
+            self.assertEqual(resource_route("https://www.realestate.com.au" + path, "script"), "proxy")
+        self.assertEqual(resource_route("https://cdn.example/ips.js", "script"), "direct")
         self.assertEqual(resource_route("https://www.realestate.com.au/app.css", "stylesheet"), "direct")
         self.assertEqual(resource_route("https://www.realestate.com.au/rent/in-2042/list-1", "document"), "proxy")
         self.assertEqual(resource_route("https://www.realestate.com.au/challenge/tl", "xhr"), "proxy")
         self.assertEqual(resource_route("https://www.realestate.com.au/challenge/r", "fetch"), "proxy")
         self.assertEqual(resource_route("https://csp.sec-team.realestate.com.au/report", "fetch"), "direct")
+
+    def test_browser_verification_script_uses_original_browser_transport(self):
+        from src.utils.network import NetworkPolicy, TrafficBudget
+        from unittest.mock import MagicMock
+        policy = NetworkPolicy(proxied=True, budget=TrafficBudget())
+        route = MagicMock()
+        route.request.url = 'https://www.realestate.com.au/opaque/session/ips.js?x-kpsdk-im=fixture'
+        route.request.resource_type = 'script'
+        try:
+            with patch.object(policy.direct, 'send') as static_download:
+                policy.route(route)
+                route.continue_.assert_called_once()
+                route.fulfill.assert_not_called()
+                static_download.assert_not_called()
+                self.assertEqual(policy.budget.proxy_requests, 1)
+        finally:
+            policy.close()
 
     def test_domain_hosts_stay_direct_when_only_realestate_is_enabled(self):
         from src.utils.network import resource_route, ProxyPool

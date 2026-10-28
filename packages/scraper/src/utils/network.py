@@ -86,12 +86,17 @@ def target_hosts():
 def resource_route(url, resource_type):
     if resource_type in {"image", "media", "font"}:
         return "block"
-    # Same-origin bundles and the validation SDK are public downloads too.
-    # Only documents and stateful validation/data requests need the AU session.
+    parsed = urlsplit(url)
+    hostname = (parsed.hostname or "").lower().rstrip('.')
+    # The observed 429 page's ips.js is part of a stateful browser check.
+    # Preserve its browser transport, cookies and AU exit; static bundles can
+    # still use the independent ordinary download/cache below.
+    if (resource_type == 'script' and parsed.path.rsplit('/', 1)[-1].lower() == 'ips.js'
+            and hostname in target_hosts()):
+        return 'proxy'
     if resource_type in {"script", "stylesheet"}:
         return "direct"
-    hostname = (urlsplit(url).hostname or "").lower()
-    if hostname.rstrip('.') in target_hosts():
+    if hostname in target_hosts():
         return "proxy"
     return "direct"
 

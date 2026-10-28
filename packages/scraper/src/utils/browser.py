@@ -369,6 +369,10 @@ class BrowserManager:
                     return False
                 # Automatic site redirects may begin after the initial document was ready.
                 page.wait_for_load_state('domcontentloaded', timeout=45000)
+                status = self._navigation_status or status
+                if status >= 400:
+                    logger.error("HTTP %s after automatic navigation loading %s", status, url)
+                    return False
                 if self.network_policy and self.network_policy.budget.exhausted:
                     logger.error("Network budget reached")
                     return False
