@@ -167,6 +167,9 @@ def capture(args):
     browser = None
     domain_browser = None
     domain_profile = args.output / 'profiles' / 'domain-session'
+    realestate_browser = None
+    realestate_profile = args.output / 'profiles' / 'realestate-session'
+    realestate_started, realestate_ip = None, None
     baseline_path = args.db.parent / 'metro-baseline.json'
     try:
         baseline = json.loads(baseline_path.read_text()) if baseline_path.exists() else {}
@@ -223,11 +226,18 @@ def capture(args):
             query = SearchQuery.from_dict(item['query'])
             item.pop('error', None)
             reuse_domain = query.source == 'domain' and args.detail_limit == 0
+            reuse_realestate = query.source == 'realestate' and mode == 'incremental' and args.detail_limit == 0
             if query.source != 'domain' and domain_browser:
                 domain_browser.close()
                 domain_browser = None
                 shutil.rmtree(domain_profile, ignore_errors=True)
-            os.environ['PROXY_SESSION'] = uuid.uuid4().hex[:12]
+            if realestate_browser and (not reuse_realestate or time.monotonic() - realestate_started >= 1200):
+                realestate_browser.close()
+                realestate_browser = None
+                shutil.rmtree(realestate_profile, ignore_errors=True)
+                state['realestate_browser_refreshes'] = state.get('realestate_browser_refreshes', 0) + 1
+            if not (reuse_realestate and realestate_browser):
+                os.environ['PROXY_SESSION'] = uuid.uuid4().hex[:12]
             geoip_address = None
             if query.source == 'realestate':
                 try:
@@ -235,15 +245,28 @@ def capture(args):
                 except Exception as error:
                     state['errors'].append({'source': 'realestate', 'stage': 'proxy_check', 'error': type(error).__name__})
                     break
+                # Even inside a sticky lease, stop using a fingerprint whose
+                # verified GeoIP no longer matches the provider's actual exit.
+                if realestate_browser and geoip_address != realestate_ip:
+                    realestate_browser.close()
+                    realestate_browser = None
+                    shutil.rmtree(realestate_profile, ignore_errors=True)
+                    state['realestate_browser_refreshes'] = state.get('realestate_browser_refreshes', 0) + 1
             item['status'] = 'running'
-            profile = domain_profile if reuse_domain else args.output / 'profiles' / (query.source + '-' + uuid.uuid4().hex)
+            profile = (domain_profile if reuse_domain else realestate_profile if reuse_realestate
+                       else args.output / 'profiles' / (query.source + '-' + uuid.uuid4().hex))
             try:
                 if reuse_domain and domain_browser:
                     browser = domain_browser
+                elif reuse_realestate and realestate_browser:
+                    browser, realestate_browser = realestate_browser, None
+                    state['realestate_browser_reuses'] = state.get('realestate_browser_reuses', 0) + 1
                 else:
                     browser = BrowserManager(browser_type=BrowserType.PLAYWRIGHT,
                         source=query.source, profile_dir=str(profile), geoip_address=geoip_address)
                     browser.create_driver()
+                    if reuse_realestate:
+                        realestate_started, realestate_ip = time.monotonic(), geoip_address
                 scraper = FACTORIES[query.source]()
                 while not budget.exhausted:
                     page = item['next_page']
@@ -276,6 +299,8 @@ def capture(args):
                             browser = BrowserManager(browser_type=BrowserType.PLAYWRIGHT,
                                 source=query.source, profile_dir=str(profile), geoip_address=geoip_address)
                             browser.create_driver()
+                            if reuse_realestate:
+                                realestate_started, realestate_ip = time.monotonic(), geoip_address
                             state['browser_restarts'] = state.get('browser_restarts', 0) + 1
                         time.sleep(3)
                     item.update(total=snapshot.total, visible_pages=snapshot.pages,
@@ -410,18 +435,26 @@ def capture(args):
                 if reuse_domain and item['status'] in {'done', 'split'} and not budget.exhausted:
                     domain_browser = browser
                     browser = None
+                elif reuse_realestate and item['status'] in {'done', 'split'} and not budget.exhausted:
+                    realestate_browser, browser = browser, None
                 else:
                     if browser:
                         browser.close()
                         browser = None
                     if reuse_domain:
                         domain_browser = None
+                    if reuse_realestate:
+                        realestate_browser = None
                     shutil.rmtree(profile, ignore_errors=True)
                 checkpoint(args, state, budget)
         if domain_browser:
             domain_browser.close()
             domain_browser = None
             shutil.rmtree(domain_profile, ignore_errors=True)
+        if realestate_browser:
+            realestate_browser.close()
+            realestate_browser = None
+            shutil.rmtree(realestate_profile, ignore_errors=True)
         if budget.exhausted:
             state['errors'].append({'stage': 'budget', 'error': 'Budget reached; checkpoint retained'})
         observed = set(tuple(value) for value in state['seen'].values())
@@ -478,6 +511,9 @@ def capture(args):
         if domain_browser:
             domain_browser.close()
             shutil.rmtree(domain_profile, ignore_errors=True)
+        if realestate_browser:
+            realestate_browser.close()
+            shutil.rmtree(realestate_profile, ignore_errors=True)
         if state is not None and budget is not None:
             checkpoint(args, state, budget)
         store.close()

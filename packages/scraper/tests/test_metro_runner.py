@@ -27,6 +27,7 @@ class Harness:
         self.navigation_failures = navigation_failures
         self.navigation_status = navigation_status
         self.sleep_calls = []
+        self.browser_closes = 0
 
     def browser_factory(self, source, **kwargs):
         harness = self
@@ -43,7 +44,7 @@ class Harness:
                     return False
                 return page not in harness.fail_pages
             def get_page_source(self): return 'fixture'
-            def close(self): pass
+            def close(self): harness.browser_closes += 1
         return Browser()
 
     def snapshot(self, source, html, query, page):
@@ -91,6 +92,92 @@ def arguments(folder, source='domain', mode='full'):
 
 
 class MetroRunnerTests(unittest.TestCase):
+    def test_incremental_realestate_reuses_a_verified_browser_between_regions(self):
+        queries = [SearchQuery('realestate', 'sydney', name, name) for name in ('One', 'Two')]
+        spec = lambda query, page: {'total': 2, 'pages': 1, 'ids': ['A', 'B']}
+        with tempfile.TemporaryDirectory() as folder:
+            args = arguments(folder, source='realestate')
+            self.assertEqual(Harness(spec).run(args, queries)['exit_code'], 0)
+            args.mode, args.output = 'incremental', Path(folder) / 'incremental'
+            harness = Harness(spec)
+            result = harness.run(args, queries)
+            self.assertEqual(result['exit_code'], 0)
+            self.assertEqual(len(harness.sessions), 1)
+            self.assertEqual(harness.verified, harness.sessions * 2)
+            self.assertEqual(harness.browser_closes, 1)
+
+    def test_incremental_realestate_recreates_browser_when_verified_exit_changes(self):
+        queries = [SearchQuery('realestate', 'sydney', name, name) for name in ('One', 'Two')]
+        spec = lambda query, page: {'total': 2, 'pages': 1, 'ids': ['A', 'B']}
+        with tempfile.TemporaryDirectory() as folder:
+            args = arguments(folder, source='realestate')
+            self.assertEqual(Harness(spec).run(args, queries)['exit_code'], 0)
+            args.mode, args.output = 'incremental', Path(folder) / 'incremental'
+            harness = Harness(spec)
+            original_verify = harness.verify
+            def verify(*args, **kwargs):
+                info = original_verify(*args, **kwargs)
+                info['ip'] = '203.0.113.' + str(6 + len(harness.verified))
+                return info
+            harness.verify = verify
+            result = harness.run(args, queries)
+            self.assertEqual(result['exit_code'], 0)
+            self.assertEqual(harness.browser_geoips, ['203.0.113.7', '203.0.113.8'])
+            self.assertEqual(harness.browser_closes, 2)
+
+    def test_incremental_realestate_rotates_before_sticky_session_expires(self):
+        queries = [SearchQuery('realestate', 'sydney', name, name) for name in ('One', 'Two')]
+        spec = lambda query, page: {'total': 2, 'pages': 1, 'ids': ['A', 'B']}
+        with tempfile.TemporaryDirectory() as folder:
+            args = arguments(folder, source='realestate')
+            self.assertEqual(Harness(spec).run(args, queries)['exit_code'], 0)
+            args.mode, args.output = 'incremental', Path(folder) / 'incremental'
+            harness = Harness(spec)
+            with patch.object(runner.time, 'monotonic', side_effect=[1000, 2201, 2201]):
+                result = harness.run(args, queries)
+            self.assertEqual(result['exit_code'], 0)
+            self.assertEqual(len(set(harness.sessions)), 2)
+            self.assertEqual(harness.verified, harness.sessions)
+            self.assertEqual(harness.browser_closes, 2)
+
+    def test_incremental_reused_browser_never_skips_failed_au_verification(self):
+        queries = [SearchQuery('realestate', 'sydney', name, name) for name in ('One', 'Two')]
+        spec = lambda query, page: {'total': 2, 'pages': 1, 'ids': ['A', 'B']}
+        with tempfile.TemporaryDirectory() as folder:
+            args = arguments(folder, source='realestate')
+            self.assertEqual(Harness(spec).run(args, queries)['exit_code'], 0)
+            args.mode, args.output = 'incremental', Path(folder) / 'incremental'
+            harness = Harness(spec)
+            original_verify = harness.verify
+            def verify(*args, **kwargs):
+                if harness.verified:
+                    raise RuntimeError('Second exit failed AU verification')
+                return original_verify(*args, **kwargs)
+            harness.verify = verify
+            result = harness.run(args, queries)
+            self.assertEqual(result['exit_code'], 1)
+            self.assertEqual(harness.visits, [1])
+            self.assertEqual(harness.browser_closes, 1)
+
+    def test_incremental_reused_browser_rejection_gets_a_fresh_verified_session(self):
+        queries = [SearchQuery('realestate', 'sydney', name, name) for name in ('One', 'Two')]
+        spec = lambda query, page: {'total': 2, 'pages': 1, 'ids': ['A', 'B']}
+        with tempfile.TemporaryDirectory() as folder:
+            args = arguments(folder, source='realestate')
+            self.assertEqual(Harness(spec).run(args, queries)['exit_code'], 0)
+            args.mode, args.output, args.retries = 'incremental', Path(folder) / 'incremental', 1
+            def arm_rejection(query, page):
+                if query.region == 'One':
+                    harness.navigation_failures = 1
+                return spec(query, page)
+            harness = Harness(arm_rejection)
+            result = harness.run(args, queries)
+            self.assertEqual(result['exit_code'], 0)
+            self.assertEqual(harness.visits, [1, 1, 1])
+            self.assertEqual(len(set(harness.sessions)), 2)
+            self.assertEqual(harness.verified, [harness.sessions[0], harness.sessions[0], harness.sessions[1]])
+            self.assertEqual(harness.browser_closes, 2)
+
     def test_realestate_block_retries_same_page_with_a_new_verified_au_session(self):
         harness = Harness(lambda query, page: {'total': 2, 'pages': 1, 'ids': ['A', 'B']}, navigation_failures=1)
         original_verify = harness.verify
