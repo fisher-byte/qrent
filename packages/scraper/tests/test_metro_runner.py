@@ -132,10 +132,35 @@ class MetroRunnerTests(unittest.TestCase):
             args = arguments(folder, source='realestate')
             self.assertEqual(Harness(spec).run(args, queries)['exit_code'], 0)
             args.mode, args.output = 'incremental', Path(folder) / 'incremental'
-            harness = Harness(spec)
-            with patch.object(runner.time, 'monotonic', side_effect=[1000, 2201, 2201]):
+            stamp = [1000]
+            def advance_after_first_region(query, page):
+                stamp[0] = 2201
+                return spec(query, page)
+            harness = Harness(advance_after_first_region)
+            with patch.object(runner.time, 'monotonic', side_effect=lambda: stamp[0]):
                 result = harness.run(args, queries)
             self.assertEqual(result['exit_code'], 0)
+            self.assertEqual(len(set(harness.sessions)), 2)
+            self.assertEqual(harness.verified, harness.sessions)
+            self.assertEqual(harness.browser_closes, 2)
+
+    def test_incremental_rotates_expired_session_inside_one_region_before_next_page(self):
+        queries = [SearchQuery('realestate', 'sydney', 'One', 'One')]
+        spec = lambda query, page: {'total': 6, 'pages': 3, 'ids': [str(page * 2), str(page * 2 + 1)]}
+        with tempfile.TemporaryDirectory() as folder:
+            args = arguments(folder, source='realestate')
+            self.assertEqual(Harness(spec).run(args, queries)['exit_code'], 0)
+            args.mode, args.output = 'incremental', Path(folder) / 'incremental'
+            stamp = [1000]
+            def expire_after_first_page(query, page):
+                if page == 1:
+                    stamp[0] = 2201
+                return spec(query, page)
+            harness = Harness(expire_after_first_page)
+            with patch.object(runner.time, 'monotonic', side_effect=lambda: stamp[0]):
+                result = harness.run(args, queries)
+            self.assertEqual(result['exit_code'], 0)
+            self.assertEqual(harness.visits, [1, 2, 3])
             self.assertEqual(len(set(harness.sessions)), 2)
             self.assertEqual(harness.verified, harness.sessions)
             self.assertEqual(harness.browser_closes, 2)

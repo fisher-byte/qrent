@@ -271,6 +271,17 @@ def capture(args):
                 while not budget.exhausted:
                     page = item['next_page']
                     for attempt in range(args.retries + 1):
+                        if reuse_realestate and time.monotonic() - realestate_started >= 1200:
+                            browser.close()
+                            browser = None
+                            shutil.rmtree(profile, ignore_errors=True)
+                            os.environ['PROXY_SESSION'] = uuid.uuid4().hex[:12]
+                            geoip_address = verify_realestate_exit(state, key, budget)
+                            browser = BrowserManager(browser_type=BrowserType.PLAYWRIGHT,
+                                source=query.source, profile_dir=str(profile), geoip_address=geoip_address)
+                            browser.create_driver()
+                            realestate_started, realestate_ip = time.monotonic(), geoip_address
+                            state['realestate_browser_refreshes'] = state.get('realestate_browser_refreshes', 0) + 1
                         if browser.navigate(query.url(page), wait_time=5 if page == 1 else 3):
                             html = browser.get_page_source()
                             try:
