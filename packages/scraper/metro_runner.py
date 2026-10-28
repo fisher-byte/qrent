@@ -77,6 +77,15 @@ def covered_query_ids(state, key):
     return result
 
 
+def verify_realestate_exit(state, key, budget):
+    verified = verify_au_proxy('realestate', budget, include_ip=True)
+    address = verified.pop('ip', None)
+    state['exit'] = verified
+    state.setdefault('verified_sessions', {})[key] = {
+        **verified, 'session_hash': hashlib.sha256(os.environ['PROXY_SESSION'].encode()).hexdigest()[:16]}
+    return address
+
+
 def initial_state(args, mode, queries, store):
     columns = ('house_id', 'source', 'price_per_week', 'address_line1', 'suburb', 'state', 'postcode',
                'bedroom_count', 'bathroom_count', 'parking_count', 'property_type')
@@ -222,11 +231,7 @@ def capture(args):
             geoip_address = None
             if query.source == 'realestate':
                 try:
-                    verified_exit = verify_au_proxy('realestate', budget, include_ip=True)
-                    geoip_address = verified_exit.pop('ip', None)
-                    state['exit'] = verified_exit
-                    state.setdefault('verified_sessions', {})[key] = {
-                        **state['exit'], 'session_hash': hashlib.sha256(os.environ['PROXY_SESSION'].encode()).hexdigest()[:16]}
+                    geoip_address = verify_realestate_exit(state, key, budget)
                 except Exception as error:
                     state['errors'].append({'source': 'realestate', 'stage': 'proxy_check', 'error': type(error).__name__})
                     break
@@ -255,12 +260,18 @@ def capture(args):
                                 break
                         elif attempt == args.retries:
                             raise RuntimeError('Navigation failed or blocked')
-                        elif query.source == 'domain' and getattr(browser, '_navigation_status', None) in {403, 429}:
-                            logger.warning('Domain rejected the session; retrying this page in a fresh direct browser')
+                        elif ((query.source == 'domain' and getattr(browser, '_navigation_status', None) in {403, 429})
+                              or (query.source == 'realestate' and getattr(browser, '_navigation_status', None) == 403)):
+                            logger.warning('%s rejected the session; retrying this page in a fresh verified browser', query.source)
                             browser.close()
                             shutil.rmtree(profile, ignore_errors=True)
+                            if query.source == 'realestate':
+                                os.environ['PROXY_SESSION'] = uuid.uuid4().hex[:12]
+                                geoip_address = verify_realestate_exit(state, key, budget)
+                                state.setdefault('proxy_failovers', []).append({
+                                    'query': key, 'after_http': 403, **state['verified_sessions'][key]})
                             browser = BrowserManager(browser_type=BrowserType.PLAYWRIGHT,
-                                source=query.source, profile_dir=str(profile))
+                                source=query.source, profile_dir=str(profile), geoip_address=geoip_address)
                             browser.create_driver()
                             state['browser_restarts'] = state.get('browser_restarts', 0) + 1
                         time.sleep(3)

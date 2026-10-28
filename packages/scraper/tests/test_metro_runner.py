@@ -89,6 +89,42 @@ def arguments(folder, source='domain', mode='full'):
 
 
 class MetroRunnerTests(unittest.TestCase):
+    def test_realestate_403_retries_same_page_with_a_new_verified_au_session(self):
+        harness = Harness(lambda query, page: {'total': 2, 'pages': 1, 'ids': ['A', 'B']}, navigation_failures=1)
+        original_verify = harness.verify
+        def verify(*args, **kwargs):
+            info = original_verify(*args, **kwargs)
+            if kwargs.get('include_ip'):
+                info['ip'] = '203.0.113.' + str(6 + len(harness.verified))
+            return info
+        harness.verify = verify
+        with tempfile.TemporaryDirectory() as folder:
+            args = arguments(folder, source='realestate')
+            args.retries = 1
+            result = harness.run(args, [SearchQuery('realestate', 'sydney', 'Region', 'atlas')])
+            self.assertEqual(result['exit_code'], 0)
+            self.assertEqual(harness.visits, [1, 1])
+            self.assertEqual(harness.verified, harness.sessions)
+            self.assertEqual(len(set(harness.sessions)), 2)
+            self.assertEqual(harness.browser_geoips, ['203.0.113.7', '203.0.113.8'])
+
+    def test_realestate_failover_never_navigates_with_an_unverified_exit(self):
+        harness = Harness(lambda query, page: {'total': 2, 'pages': 1, 'ids': ['A', 'B']}, navigation_failures=1)
+        original_verify = harness.verify
+        def verify(*args, **kwargs):
+            if harness.verified:
+                raise RuntimeError('Second exit failed AU verification')
+            return original_verify(*args, **kwargs)
+        harness.verify = verify
+        with tempfile.TemporaryDirectory() as folder:
+            args = arguments(folder, source='realestate')
+            args.retries = 1
+            result = harness.run(args, [SearchQuery('realestate', 'sydney', 'Region', 'atlas')])
+            self.assertEqual(result['exit_code'], 1)
+            self.assertEqual(harness.visits, [1])
+            self.assertEqual(len(harness.sessions), 1)
+            self.assertFalse((Path(folder) / 'metro-baseline.json').exists())
+
     def test_fresh_parent_total_can_validate_completed_partitions_without_rescanning_them(self):
         root_total = 5
         def spec(query, page):

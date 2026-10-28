@@ -130,6 +130,10 @@ Domain 使用官方 Sydney Region NSW / Melbourne Region VIC 搜索。Real Estat
 
 Domain 的固定 preset / no-uBO 已提升至主任务配置，preset 独立保存在私有 state 目录；原环境和 cron 已备份。07:37 worker 4188452 续跑，悉尼根最新实际总量 13,161、覆盖 13,167，通过真实父页刷新保留成功子树；墨尔本开始持续入库，仍使用普通网络。两城完整结束和最终流量继续核验。
 
+08:12 左右第四阶段实际退出 1，保存 REA 17,296 / 14,913、Domain 13,167 / 12,058，累计 2,938 页、付费中继 238,245,752 bytes。Domain 已遍历两城，剩墨尔本总量校验差 16 条；REA 同一 Melbourne City 高价段仍被拦截，故未建立完整基线。新的有界重试在 REA 403 时创建新黏性会话，先重新验证 AU 并更新 GeoIP，再重试同一页；不使用未验证出口。111 项本机测试通过。
+
+代理池另做 3 会话×2 次真实国别查询：获得 3 个不同出口，每个会话内 IP 相同，6 次均 AU。匿名指纹的盐不保存；共 40,461 付费中继字节，无新购买。它证明本次短时黏性及换会话轮换，不代表已经测试完整 30 分钟周期。
+
 - 首次恢复备份：`/root/qrent-scraper/backup/pre-recovery-20261027`。
 - 出口修复备份：`/root/qrent-scraper/backup/pre-egress-20261027_220341`。
 - 正式入口备份：`/root/qrent-scraper/backup/pre-metro-entrypoint-20261028_001844`。
