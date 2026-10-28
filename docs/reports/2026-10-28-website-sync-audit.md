@@ -21,6 +21,14 @@ GitHub 的前端 Preview 部署记录指向 Vercel `wiperis-projects/qrent-front
 
 已使用用户授权的 Google 账号登录，Vercel 身份为 `fisher-byte`。团队列表只显示 `Leon's projects`，项目列表只有两个 `5545-project` 项目；直接访问 `https://vercel.com/wiperis-projects/qrent-frontend` 返回已登录状态的 404。原项目可能不可见或地址已经变更，目前没有读到其私有配置。已请求有原官网权限的账号或后端部署连接位置；未发送访问申请、未改 DNS 或官网数据库。
 
+### 数据库直写路径补充
+
+用户随后明确：官网后端部署在悉尼的另一台服务器，爬虫可以直接写该后端数据库。这是用户提供的定位信息，尚未连接核验。排查顺序据此改为复用现有 MySQL 直写入口；Vercel 项目权限不是基础数据库同步的必要前提。是否需要前端适配，待实际库结构及缺失字段的展示契约确认后再判断。
+
+本地及原仓库最新 main 的 `CLAUDE.md` 内容相同，只说明从私有 `.env` 获取 `DATABASE_URL`，没有实际地址。另查 `scraper`、`scraper-v2`、`scraper-v2-codex`、`yibin/scraper`、`agent_remote` 分支的说明及配置，也只找到环境模板或本地默认主机。广州旧爬虫 `.env`、当前 release、登录环境及相关 shell 配置未发现数据库连接参数。
+
+现成入口为 `packages/scraper/src/services/database_importer.py:import_dataframe`，以及 `src/services/database.py:DatabaseService.save_properties`。实际连接所需 `DB_HOST`、`DB_PORT`、`DB_USER`、`DB_PASSWORD`、`DB_DATABASE` 或等价 `DATABASE_URL` 的保存位置仍待确认，已请求悉尼主机 IP 或私有配置所在路径；没有尝试写入未知数据库。
+
 ## 当前采集候选
 
 只读核验成功的全量与后续增量 `state.json` 的来源 ID union，再按 `(source, house_id)` 对 SQLite enrichment 校验，候选均有匹配 payload：
@@ -68,3 +76,9 @@ GitHub 的前端 Preview 部署记录指向 Vercel `wiperis-projects/qrent-front
 180 条均保存非空原始报价，报价与周租标量按解析规则一致，来源 URL 的站点与 source 一致；来源发布时间均保持未知。78 条有明确未来可入住日期，76 条可入住日期缺失，均不回填成今天。本次小样本不是全部历史记录的修复验收。
 
 付费中继传输 `1,453,492 bytes`，仅包含 Real Estate 与 AU 出口检查，Domain 付费流量为 0；125 次公共缓存命中，避免重复的解码响应体 `15,469,906 bytes`。未新增购买；传输计数不是供应商独立账单。原始退出码、结果与字段验收已取回 `output/website-sync-audit-20261028/integrity-pilot/`。测试库没有写入官网或主采集库。
+
+## 原始报价全量刷新进行中
+
+已在广州机启动 `output/metro-full-integrity-20261028`，使用已验收的源码 `8955442` 和主采集库，先生成独立压缩备份，再运行两站两城 full。付费传输硬上限 300,000,000 bytes，18 小时超时，详情请求上限 0，不新增购买；沿用全局采集锁，定时任务无法并发重复采集。
+
+目的是重新获取原始报价，不能从已有错误拼接价格反推原文。启动回执仅表示已发起；本轮尚未验证退出码、覆盖与最终字段计数，不作为新全量成功或官网同步完成的证明。
