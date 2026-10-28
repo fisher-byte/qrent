@@ -6,6 +6,7 @@ import time
 import logging
 from typing import List, Optional, Dict
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import googlemaps
@@ -35,7 +36,9 @@ class CommuteService:
         parts = []
         
         if prop.address_line1:
-            address1 = prop.address_line1.replace('-', ' ')
+            # Current source cards supply plain addresses, including street-number
+            # ranges. Only old all-slug addresses need hyphens expanded.
+            address1 = prop.address_line1 if ' ' in prop.address_line1 else prop.address_line1.replace('-', ' ')
             parts.append(address1)
         
         if prop.address_line2:
@@ -72,7 +75,7 @@ class CommuteService:
         try:
             # 使用明天早上 8:30 作为出发时间
             tomorrow_morning = (
-                datetime.now()
+                datetime.now(ZoneInfo('Australia/Sydney'))
                 .replace(hour=8, minute=30, second=0, microsecond=0) 
                 + timedelta(days=1)
             )
@@ -124,7 +127,7 @@ class CommuteService:
         
         try:
             tomorrow_morning = (
-                datetime.now()
+                datetime.now(ZoneInfo('Australia/Sydney'))
                 .replace(hour=8, minute=30, second=0, microsecond=0) 
                 + timedelta(days=1)
             )

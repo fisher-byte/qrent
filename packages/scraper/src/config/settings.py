@@ -84,14 +84,22 @@ class CommuteConfig:
 SCHOOL_COORDINATES: Dict[str, str] = {
     'UNSW': "University of New South Wales, Kensington NSW 2052, Australia",
     'USYD': "University of Sydney, Camperdown NSW 2006, Australia",
-    'UTS': "University of Technology Sydney, Ultimo NSW 2007, Australia"
+    'UTS': "University of Technology Sydney, Ultimo NSW 2007, Australia",
+    'UNIMELB': "University of Melbourne, Grattan Street, Parkville VIC 3010, Australia",
+    'UNIMELB_SOUTHBANK': "University of Melbourne, 234 St Kilda Road, Southbank VIC 3006, Australia",
+    'MONASH': "Monash University, Wellington Road, Clayton VIC 3800, Australia",
+    'MONASH_CAULFIELD': "Monash University, 900 Dandenong Road, Caulfield East VIC 3145, Australia"
 }
 
 # School name mapping
 SCHOOL_NAME_MAPPING: Dict[str, str] = {
     'UNSW': 'University of New South Wales',
     'USYD': 'University of Sydney',
-    'UTS': 'University of Technology Sydney'
+    'UTS': 'University of Technology Sydney',
+    'UNIMELB': 'University of Melbourne',
+    'UNIMELB_SOUTHBANK': 'University of Melbourne Southbank',
+    'MONASH': 'Monash University',
+    'MONASH_CAULFIELD': 'Monash University Caulfield'
 }
 
 # Target areas configuration

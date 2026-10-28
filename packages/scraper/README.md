@@ -34,7 +34,21 @@ A modular collector for Australian rental listings from Domain and Real Estate. 
 - 两站的最新优先排序从页面元数据校验，缺失或不匹配时拒绝增量早停；Real Estate 旧房源的全部字段变化由每周全量覆盖。
 - 本轮代理累计购买上限为 USD 1.50，包含已购买的 USD 0.30 一次性额度，无自动续费。所有传输统计必须同时对照供应商实际扣量；最终数字见恢复报告。
 
-## 2026-10-27 恢复运行入口
+## 原流水线与月度预算
+
+`enrichment_runner.py` 接续采集后的原 AI 评分（两次调用、每次 4 组）、中英文关键词、真实公交通勤和既有 MySQL 表写入。默认只审计；`--enrich` 才允许调用 API，`--publish` 才在完整字段校验与只读备份后写原表，不执行建表或迁移。
+
+所有正式运行必须复用同一份持久化 `--state` SQLite 账本；它保存模型输入缓存、规范化地址与学校路线、月度请求和金额。独占锁拒绝重叠运行；已成功结果不会因普通重跑或新月份重新调用。该文件必须连同采集库备份，禁止换空账本绕过已用额度。
+
+月度金额最多 USD 5（`QRENT_MONTHLY_USD_LIMIT` 只能调低），请求前预留、成功后按 tokens 结算；代理采购通过 `EnrichmentState.record_expense` 按唯一购买回执登记，预付流量消耗不重复登记。历史费用在启用前登记。Google 的每月免费量按真实结算账号汇总，多 Key 不扩充额度。
+
+地图可复用 `GOOGLE_MAPS_API_KEY`，`GOOGLE_MAPS_API_MODE=routes` 使用当前 Routes API；旧已启用账号可指定 `legacy`。`GOOGLE_MAPS_POOL_FILE` 可指向私有 JSON 列表，每项包含 `api_key`、真实共用的 `billing_group`、`provider`，可带 `monthly_limit`（默认及最大 9500）。只请求公交时长，不在没有路线时伪造驾驶乘数。`GOOGLE_MAPS_HTTP_PROXY` 可指定独立普通出口；不继承住宅代理环境变量。密钥文件不进入 Git。
+
+原表学校代码包含 `UNSW/USYD/UTS/UNIMELB/UNIMELB_SOUTHBANK/MONASH/MONASH_CAULFIELD`。完整描述与模型回执留本地；原库描述列长度保持不变。未知价格、评分、通勤的记录不发布；来源发布时间与原写库采集时间的语义见 [当前报告](../../docs/reports/2026-10-29-enrichment-recovery.md)。
+
+两站两城 4 条完整记录、14 条真实路线、缓存重跑及原表 DML / API 已通过小样本验收，尚未接到每日自动发布。低价 API 与首次/日常费用边界见 [采购候选](../../docs/reports/2026-10-29-commute-api-options.md)。不要把此处说明当作全量已同步。
+
+### 原采集恢复入口
 
 腾讯云现有独立部署位于 `/root/qrent-scraper`，使用 SQLite；它与根目录 Docker Compose 的 MySQL 后端是两条数据路径。
 新的 `recovery_runner.py` 可写入原 SQLite 表，按来源区分 ID，失败或部分扫描不会下架存量房源。

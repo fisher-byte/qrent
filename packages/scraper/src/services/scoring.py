@@ -13,6 +13,7 @@ from tqdm import tqdm
 
 from ..models import PropertyData
 from ..config import settings, ScoringConfig
+from .enrichment_state import APILimitReached
 
 logger = logging.getLogger(__name__)
 
@@ -76,8 +77,10 @@ class ScoringService:
     使用 DashScope API 进行评分和关键词提取
     """
     
-    def __init__(self, config: Optional[ScoringConfig] = None):
+    def __init__(self, config: Optional[ScoringConfig] = None, *, call_guard=None, call_observer=None):
         self.config = config or settings.scoring
+        self.call_guard = call_guard
+        self.call_observer = call_observer
         api_key = (
             self.config.api_key
             or getattr(settings, "env_property_rating_api_key", None)
@@ -94,6 +97,8 @@ class ScoringService:
     ) -> Optional[str]:
         """调用模型 API"""
         for attempt in range(max_retries):
+            # Outside the retry handler: budget exhaustion must stop requests.
+            request_id = self.call_guard(system_prompt, user_prompt, self.config.max_tokens) if self.call_guard else None
             try:
                 messages = [
                     {'role': 'system', 'content': system_prompt},
@@ -106,15 +111,22 @@ class ScoringService:
                     result_format='message',
                     temperature=self.config.temperature,
                     max_tokens=self.config.max_tokens,
-                    top_p=0.9
+                    top_p=0.9,
+                    enable_thinking=False
                 )
+                if self.call_observer:
+                    self.call_observer(request_id, response.status_code, dict(response.usage or {}))
                 
                 if response.status_code == 200:
                     return response.output.choices[0]['message']['content']
                 else:
                     logger.error(f"API 错误: {response.code} - {response.message}")
                     
+            except APILimitReached:
+                raise
             except Exception as e:
+                if self.call_observer:
+                    self.call_observer(request_id, type(e).__name__, {})
                 logger.error(f"第 {attempt + 1} 次调用失败: {e}")
                 if attempt < max_retries - 1:
                     time.sleep(2 ** attempt)
@@ -123,7 +135,7 @@ class ScoringService:
     
     def _parse_scores(self, response_text: str) -> List[float]:
         """解析评分结果"""
-        pattern = r'总评分\s*:\s*(\d+(?:\.\d+)?)'
+        pattern = r'总评分\s*[:：]\s*(\d+(?:\.\d+)?)'
         matches = re.findall(pattern, response_text, re.IGNORECASE)
         
         scores = []
@@ -137,7 +149,7 @@ class ScoringService:
         
         return scores
     
-    def score_property(self, description: str) -> Tuple[float, List[float]]:
+    def score_property(self, description: str) -> Tuple[Optional[float], List[float]]:
         """
         对单个房产进行评分
         
@@ -148,7 +160,7 @@ class ScoringService:
             (平均分, 所有分数列表)
         """
         if not description or not description.strip():
-            return 0.0, []
+            return None, []
         
         user_prompt = (
             f"根据以下房源描述，对房屋质量、居住体验、房屋内部配套设施三个维度分别打 0~10 分，"
@@ -164,14 +176,15 @@ class ScoringService:
             response = self._call_model(SCORING_SYSTEM_PROMPT, user_prompt)
             if response:
                 scores = self._parse_scores(response)
-                all_scores.extend(scores)
+                if len(scores) == self.config.scores_per_call:
+                    all_scores.extend(scores)
             time.sleep(1)  # 避免 rate limit
         
-        if all_scores:
+        if len(all_scores) == self.config.num_calls * self.config.scores_per_call:
             avg_score = sum(all_scores) / len(all_scores)
             return round(avg_score, 1), all_scores
         
-        return 13.0, []  # 默认分数
+        return None, []  # Failed/incomplete evaluation must not become a fabricated rating.
     
     def extract_keywords_en(self, description: str) -> str:
         """提取英文关键词"""

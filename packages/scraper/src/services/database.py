@@ -13,6 +13,7 @@ from mysql.connector import Error
 from ..models import PropertyData, RegionInfo
 from ..config import settings, DatabaseConfig, SCHOOL_NAME_MAPPING
 from ..utils import safe_int, safe_float, safe_str, safe_datetime, truncate_string
+from .publication import publication_errors, source_from_url, mysql_availability, website_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -106,12 +107,24 @@ class DatabaseService:
             if result:
                 return result[0]
             
-            # 创建新区域
+            # Production has a unique name, including across states. Preserve
+            # the original rows and disambiguate only colliding new locations.
+            self.cursor.execute("SELECT id, state, postcode FROM regions WHERE name = %s", (region_info.name,))
+            collision = self.cursor.fetchone()
+            name = region_info.name
+            if collision:
+                name = f"{name} ({region_info.state} {region_info.postcode})"
+                self.cursor.execute("SELECT id FROM regions WHERE name = %s AND state = %s AND postcode = %s",
+                                    (name, region_info.state, region_info.postcode))
+                result = self.cursor.fetchone()
+                if result:
+                    return result[0]
+            # This insert belongs to the property savepoint; do not commit it
+            # before the complete property and school association succeed.
             self.cursor.execute(
                 "INSERT INTO regions (name, state, postcode) VALUES (%s, %s, %s)",
-                (region_info.name, region_info.state, region_info.postcode)
+                (name, region_info.state, region_info.postcode)
             )
-            self.commit()
             return self.cursor.lastrowid
             
         except Exception as e:
@@ -121,16 +134,19 @@ class DatabaseService:
     def get_school_id(self, school_name: str) -> Optional[int]:
         """获取学校 ID"""
         try:
-            self.cursor.execute("SELECT id FROM schools WHERE name = %s", (school_name,))
-            result = self.cursor.fetchone()
-            
-            if result:
-                return result[0]
-            
-            # 创建新学校
-            self.cursor.execute("INSERT INTO schools (name) VALUES (%s)", (school_name,))
-            self.commit()
-            return self.cursor.lastrowid
+            # Production uses existing school codes. Retain compatibility with
+            # older deployments that stored the full name, without creating an
+            # unrelated school that the website never queries.
+            candidates = [school_name]
+            if school_name in SCHOOL_NAME_MAPPING:
+                candidates.append(SCHOOL_NAME_MAPPING[school_name])
+            for name in candidates:
+                self.cursor.execute("SELECT id FROM schools WHERE name = %s", (name,))
+                result = self.cursor.fetchone()
+                if result:
+                    return result[0]
+            logger.error("School is not present in the existing website database: %s", school_name)
+            return None
             
         except Exception as e:
             logger.error(f"获取学校ID失败: {e}")
@@ -143,7 +159,7 @@ class DatabaseService:
                 """
                 SELECT id, price, address, bedroom_count, bathroom_count, 
                        parking_count, keywords, average_score, description_en, 
-                       url, release_time
+                       url, published_at
                 FROM properties WHERE house_id = %s
                 """,
                 (house_id,)
@@ -162,13 +178,13 @@ class DatabaseService:
                     'average_score': result[7],
                     'description_en': result[8],
                     'url': result[9],
-                    'release_time': result[10]
+                    'published_at': result[10]
                 }
             return None
             
         except Exception as e:
             logger.error(f"查询房产失败: {e}")
-            return None
+            raise  # A failed lookup must not be mistaken for an absent row.
     
     def insert_property(self, prop: PropertyData, region_id: int) -> Optional[int]:
         """插入新房产"""
@@ -191,27 +207,23 @@ class DatabaseService:
                 prop.parking_count,
                 prop.property_type,
                 prop.house_id,
-                prop.available_date,
-                truncate_string(prop.keywords, 255) if prop.keywords else None,
+                mysql_availability(prop.available_date),
+                prop.keywords,
                 prop.average_score,
                 truncate_string(prop.description_en, 1024) if prop.description_en else None,
                 truncate_string(prop.description_cn, 1024) if prop.description_cn else None,
                 truncate_string(prop.url, 255) if prop.url else None,
-                prop.published_at or datetime.now(),
+                website_timestamp(prop),
                 prop.thumbnail_url
             )
             
             self.cursor.execute(insert_sql, values)
             property_id = self.cursor.lastrowid
             
-            # 更新缓存
-            self._existing_house_ids.add(str(prop.house_id))
-            
             return property_id
             
         except Exception as e:
             logger.error(f"插入房产失败: {e}")
-            self.rollback()
             return None
     
     def update_property(self, property_id: int, prop: PropertyData, region_id: int) -> bool:
@@ -237,13 +249,13 @@ class DatabaseService:
                 prop.bathroom_count,
                 prop.parking_count,
                 prop.property_type,
-                prop.available_date,
-                truncate_string(prop.keywords, 255) if prop.keywords else None,
+                mysql_availability(prop.available_date),
+                prop.keywords,
                 prop.average_score,
                 truncate_string(prop.description_en, 1024) if prop.description_en else None,
                 truncate_string(prop.description_cn, 1024) if prop.description_cn else None,
                 truncate_string(prop.url, 255) if prop.url else None,
-                prop.published_at or datetime.now(),
+                website_timestamp(prop),
                 prop.thumbnail_url,
                 property_id
             )
@@ -253,7 +265,6 @@ class DatabaseService:
             
         except Exception as e:
             logger.error(f"更新房产失败: {e}")
-            self.rollback()
             return False
     
     def upsert_property_school(
@@ -264,15 +275,11 @@ class DatabaseService:
     ) -> bool:
         """插入或更新房产-学校关系"""
         try:
-            # 删除已有关系
+            if type(commute_time) is not int or commute_time <= 0:
+                return False
             self.cursor.execute(
-                "DELETE FROM property_school WHERE property_id = %s AND school_id = %s",
-                (property_id, school_id)
-            )
-            
-            # 插入新关系
-            self.cursor.execute(
-                "INSERT INTO property_school (property_id, school_id, commute_time) VALUES (%s, %s, %s)",
+                "INSERT INTO property_school (property_id, school_id, commute_time) VALUES (%s, %s, %s) "
+                "ON DUPLICATE KEY UPDATE commute_time = VALUES(commute_time)",
                 (property_id, school_id, commute_time)
             )
             
@@ -280,6 +287,25 @@ class DatabaseService:
             
         except Exception as e:
             logger.error(f"更新房产-学校关系失败: {e}")
+            return False
+
+    def upsert_property_image(self, property_id: int, thumbnail_url: str) -> bool:
+        """Keep the existing primary image identity and preserve gallery rows."""
+        try:
+            self.cursor.execute(
+                'SELECT id FROM property_images WHERE property_id = %s AND display_order = 0 ORDER BY id LIMIT 1',
+                (property_id,)
+            )
+            existing = self.cursor.fetchone()
+            if existing:
+                self.cursor.execute('UPDATE property_images SET url = %s WHERE id = %s',
+                                    (thumbnail_url, existing[0]))
+            else:
+                self.cursor.execute('INSERT INTO property_images (property_id, url, display_order) VALUES (%s, %s, 0)',
+                                    (property_id, thumbnail_url))
+            return True
+        except Exception as exc:
+            logger.error('保存房源图片失败: %s', exc)
             return False
     
     def save_properties(
@@ -307,56 +333,69 @@ class DatabaseService:
         school_name = SCHOOL_NAME_MAPPING.get(university)
         if not school_name:
             logger.error(f"未知的大学代码: {university}")
+            stats['errors'] = len(properties)
             return stats
         
-        school_id = self.get_school_id(school_name)
+        school_id = self.get_school_id(university)
         if not school_id:
             logger.error(f"无法获取学校ID: {school_name}")
+            stats['errors'] = len(properties)
             return stats
         
         # 加载已有 house_id
         self.load_existing_house_ids()
         
         for prop in properties:
+            errors = publication_errors(prop, university)
+            if errors:
+                logger.warning('Incomplete property withheld: %s/%s: %s', prop.source.value, prop.house_id, ','.join(errors))
+                stats['skipped'] += 1
+                continue
+            self.cursor.execute('SAVEPOINT property_publish')
             try:
+                existing = self.get_property_by_house_id(prop.house_id)
+                if existing and source_from_url(existing['url']) != prop.source.value:
+                    raise ValueError('Numeric house_id belongs to a different source; property withheld')
                 # 获取或创建区域
                 region_info = RegionInfo.from_address_line2(prop.address_line2)
                 region_id = self.get_or_create_region(region_info)
                 
                 if not region_id:
                     logger.warning(f"无法解析区域: {prop.address_line2}")
-                    stats['skipped'] += 1
-                    continue
-                
-                # 检查是否已存在
-                existing = self.get_property_by_house_id(prop.house_id)
+                    raise ValueError('Region could not be resolved')
                 
                 if existing:
                     # 更新现有记录
                     if self.update_property(existing['id'], prop, region_id):
                         property_id = existing['id']
-                        stats['updated'] += 1
+                        action = 'updated'
                     else:
-                        stats['errors'] += 1
-                        continue
+                        raise RuntimeError('Property update failed')
                 else:
                     # 插入新记录
                     property_id = self.insert_property(prop, region_id)
                     if property_id:
-                        stats['inserted'] += 1
+                        action = 'inserted'
                     else:
-                        stats['errors'] += 1
-                        continue
+                        raise RuntimeError('Property insert failed')
                 
                 # 更新房产-学校关系
                 commute_time = prop.commute_times.get(university)
-                self.upsert_property_school(property_id, school_id, commute_time)
+                if not self.upsert_property_school(property_id, school_id, commute_time):
+                    raise RuntimeError('Property school association failed')
+                if not self.upsert_property_image(property_id, prop.thumbnail_url):
+                    raise RuntimeError('Property image association failed')
+                self.cursor.execute('RELEASE SAVEPOINT property_publish')
+                stats[action] += 1
+                self._existing_house_ids.add(str(prop.house_id))
                 
                 # 定期提交
                 if (stats['inserted'] + stats['updated']) % 100 == 0:
                     self.commit()
                     
             except Exception as e:
+                self.cursor.execute('ROLLBACK TO SAVEPOINT property_publish')
+                self.cursor.execute('RELEASE SAVEPOINT property_publish')
                 logger.error(f"保存房产失败 ({prop.house_id}): {e}")
                 stats['errors'] += 1
         

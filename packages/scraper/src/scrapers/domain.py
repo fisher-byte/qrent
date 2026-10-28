@@ -15,7 +15,7 @@ from ..models import PropertyData, PropertySource
 from ..config import PROPERTY_TYPE_MAPPING, ScraperConfig
 from ..utils import (
     extract_price, extract_number, clean_address,
-    parse_available_date, is_valid_image_url
+    parse_available_date, is_valid_image_url, safe_datetime
 )
 from ..utils.browser import BrowserManager, BrowserType
 from ..utils.embedded import domain_search
@@ -410,13 +410,31 @@ class DomainScraper(BaseScraper):
         """解析 Domain 详情页面"""
         soup = BeautifulSoup(html, "html.parser")
         
-        # 描述
+        # The visible expander may truncate its final paragraph. The public
+        # server-rendered graph contains the complete original description.
+        graph = domain_search(soup).get('rootGraphQuery') or {}
+        listing = graph.get('listingByIdV2') or {}
+        if listing and str(listing.get('id', listing.get('listingId', ''))) != str(property_data.house_id):
+            logger.error('Domain detail identity mismatch: %s', property_data.house_id)
+            return property_data
         description = self._parse_description(soup)
-        property_data.description_en = description
+        if isinstance(listing.get('description'), str) and listing['description'].strip():
+            description = '\n\n'.join(part.strip() for part in
+                                      (listing.get('headline') or '', listing['description']) if part.strip())
+        if description:
+            property_data.description_en = description
         
         # 可用日期
-        available_date = self._parse_available_date(soup)
-        property_data.available_date = available_date
+        available = listing.get('dateAvailableV2') or {}
+        available_date = safe_datetime(available.get('isoDateWithTimeZone') or available.get('isoDate'))
+        if available_date is None:
+            available_date = self._parse_available_date(soup)
+        if available_date is not None:
+            property_data.available_date = available_date
+        listed = listing.get('dateListedV2') or {}
+        published = safe_datetime(listed.get('isoDateWithTimeZone'))
+        if published is not None:
+            property_data.published_at = published
         
         # 缩略图
         if not property_data.thumbnail_url:
