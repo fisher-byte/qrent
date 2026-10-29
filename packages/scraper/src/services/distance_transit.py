@@ -14,15 +14,25 @@ class DistanceTransitError(RuntimeError):
 def origin_matches(prop, returned):
     if not isinstance(returned,str):
         return False
-    expected=normalized_address(building_address(prop.address_line1))
-    actual=normalized_address(building_address(returned.split(',',1)[0]))
+    def street(value):
+        return normalized_address(re.sub(r'(?<=\d)\s*-\s*(?=\d)','-',value))
+    expected=street(building_address(prop.address_line1))
+    actual=street(building_address(returned.split(',',1)[0]))
     postcode=re.search(r'\bNSW\s+(\d{4})\b',prop.address_line2.replace('-',' '),re.I)
     return bool(expected==actual and postcode and
                 re.search(r'\bNSW\s+'+postcode.group(1)+r'\b',returned,re.I))
 
 
-def destination_matches(expected,returned):
+def destination_matches(expected,returned,echo=None):
     if not isinstance(returned,str):return False
+    # Reviewed Accurate responses use these main-campus POI labels. Require
+    # the exact requested campus echo for these two explicit exceptions.
+    reviewed={
+        'University of Sydney, Camperdown NSW 2006, Australia':{'the university of sydney'},
+        'University of New South Wales, Kensington NSW 2052, Australia':{
+            'unsw sydney, sydney nsw 2033, australia'}}
+    if echo==expected and returned.strip().casefold() in reviewed.get(expected,set()):
+        return True
     postcode=re.search(r'\bNSW\s+(\d{4})\b',expected,re.I)
     if not postcode or not re.search(r'\bNSW\s+'+postcode.group(1)+r'\b',returned,re.I):
         return False
@@ -32,6 +42,27 @@ def destination_matches(expected,returned):
         'university of technology sydney':('university of technology sydney','uts')}
     campus=expected.split(',',1)[0].strip().casefold()
     return any(re.search(r'\b'+re.escape(name)+r'\b',returned,re.I) for name in names.get(campus,()))
+
+
+def validate_response(prop,destination,data):
+    if not isinstance(data,dict) or data.get('status')!='OK':
+        raise DistanceTransitError('DISTANCE_INVALID_RESPONSE')
+    origins=data.get('origin_addresses') or []
+    destinations=data.get('destination_addresses') or []
+    rows=data.get('rows') or []
+    if len(origins)!=1 or len(destinations)!=1 or len(rows)!=1 or len(rows[0].get('elements') or [])!=1:
+        raise DistanceTransitError('DISTANCE_INVALID_MATRIX')
+    if not origin_matches(prop,origins[0]):
+        raise DistanceTransitError('DISTANCE_ORIGIN_NOT_EXACT')
+    element=rows[0]['elements'][0]
+    if not destination_matches(destination,destinations[0],element.get('destination')):
+        raise DistanceTransitError('DISTANCE_DESTINATION_NOT_EXACT')
+    if element.get('status')!='OK':
+        raise DistanceTransitError('DISTANCE_NO_TRANSIT_ROUTE')
+    seconds=float(element.get('duration',{}).get('value',0))
+    if not math.isfinite(seconds) or not 0<seconds<=86400:
+        raise DistanceTransitError('DISTANCE_INVALID_DURATION')
+    return max(1,round(seconds/60))
 
 
 class DistanceTransit:
@@ -47,7 +78,15 @@ class DistanceTransit:
         if self.state.get(self.provider_hold):
             raise DistanceTransitError('DISTANCE_PROVIDER_HELD_FOR_REVIEW')
         attempt=self.state.key('distancematrix-pair-attempt-v1',pair_key)
-        if self.state.get(attempt):
+        response_key=self.state.key('distancematrix-response-v1',pair_key)
+        previous=self.state.get(attempt)
+        if previous:
+            evidence=self.state.get(response_key)
+            if (evidence and evidence.get('request_id')==previous.get('request_id') and
+                    evidence.get('destination')==destination and evidence.get('mode')=='transit'):
+                minutes=validate_response(prop,destination,evidence['data'])
+                self.state.put(attempt,{**previous,'reviewed_validation':'20261030-v2','reviewed_minutes':minutes})
+                return minutes  # Keep the original call status and fee; no second HTTP.
             raise DistanceTransitError('DISTANCE_PREVIOUS_ATTEMPT_REQUIRES_REVIEW')
         origin=building_address(prop.address_line1)+', '+prop.address_line2.replace('-',' ')+', Australia'
         if '|' in origin or '|' in destination:
@@ -63,25 +102,12 @@ class DistanceTransit:
             data=response.json()
             if not isinstance(data,dict) or data.get('status')!='OK':
                 raise DistanceTransitError('DISTANCE_INVALID_RESPONSE')
-            origins=data.get('origin_addresses') or []
-            destinations=data.get('destination_addresses') or []
-            rows=data.get('rows') or []
-            if len(origins)!=1 or len(destinations)!=1 or len(rows)!=1 or len(rows[0].get('elements') or [])!=1:
-                raise DistanceTransitError('DISTANCE_INVALID_MATRIX')
-            if not origin_matches(prop,origins[0]):
-                raise DistanceTransitError('DISTANCE_ORIGIN_NOT_EXACT')
-            if not destination_matches(destination,destinations[0]):
-                raise DistanceTransitError('DISTANCE_DESTINATION_NOT_EXACT')
-            element=rows[0]['elements'][0]
-            if element.get('status')!='OK':
-                raise DistanceTransitError('DISTANCE_NO_TRANSIT_ROUTE')
-            seconds=float(element.get('duration',{}).get('value',0))
-            if not math.isfinite(seconds) or not 0<seconds<=86400:
-                raise DistanceTransitError('DISTANCE_INVALID_DURATION')
-            minutes=max(1,round(seconds/60))
+            evidence={k:data.get(k) for k in ('status','origin_addresses','destination_addresses','rows')}
+            self.state.put(response_key,{'request_id':request_id,'destination':destination,'mode':'transit','data':evidence})
+            minutes=validate_response(prop,destination,data)
             self.state.finish(request_id,'OK')
-            self.state.put(attempt,{'request_id':request_id,'status':'OK','origin':origins[0],
-                                   'destination':destinations[0],'mode':'transit','minutes':minutes})
+            self.state.put(attempt,{'request_id':request_id,'status':'OK','origin':data['origin_addresses'][0],
+                                   'destination':data['destination_addresses'][0],'mode':'transit','minutes':minutes})
             return minutes
         except Exception as exc:
             code=str(exc) if isinstance(exc,DistanceTransitError) else type(exc).__name__

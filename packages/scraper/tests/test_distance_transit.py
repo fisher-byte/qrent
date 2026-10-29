@@ -148,6 +148,38 @@ class DistanceTransitTests(unittest.TestCase):
     def test_empty_destination_text_is_not_a_verified_campus(self):
         self.assert_destination_held('')
 
+    def test_named_main_campus_without_a_postcode_requires_the_exact_requested_destination_echo(self):
+        self.payload['destination_addresses']=['The University of Sydney']
+        self.payload['rows'][0]['elements'][0]['destination']='University of Sydney, Camperdown NSW 2006, Australia'
+        with patch.object(self.pool.http,'get',return_value=self.response()):
+            self.assertEqual(self.pool.calculate(self.prop,'USYD'),23)
+
+    def test_postcode_alias_is_limited_to_the_observed_unsw_kensington_campus(self):
+        self.payload['destination_addresses']=['UNSW Sydney, Sydney NSW 2033, Australia']
+        self.payload['rows'][0]['elements'][0]['destination']='University of New South Wales, Kensington NSW 2052, Australia'
+        with patch.object(self.pool.http,'get',return_value=self.response()):
+            self.assertEqual(self.pool.calculate(self.prop,'UNSW'),23)
+
+    def test_reviewed_campus_label_without_its_exact_request_echo_is_still_held(self):
+        self.assert_destination_held('UNSW Sydney, Sydney NSW 2033, Australia')
+
+    def test_spaced_number_range_can_reuse_a_verified_response_after_review_without_http(self):
+        self.prop.address_line1='2 - 4 Fern St';self.prop.address_line2='randwick-nsw-2031'
+        self.payload['origin_addresses']=['2-4 Fern St, Randwick NSW 2031, Australia']
+        from src.services.enrichment_state import EnrichmentState
+        from src.services.address_identity import normalized_address
+        pair=EnrichmentState.key('transit-permanent-v1',normalized_address(self.prop.address_line1),
+            normalized_address(self.prop.address_line2.replace('-',' ')),'UNSW','weekday-08:30')
+        request_id=self.state.reserve_credit('distancematrix','distancematrix-growth-account',10,.002)
+        self.state.finish(request_id,'DISTANCE_ORIGIN_NOT_EXACT')
+        self.state.put(self.state.key('distancematrix-pair-attempt-v1',pair),{'request_id':request_id,'status':'reserved'})
+        self.state.put(self.state.key('distancematrix-response-v1',pair),{'request_id':request_id,
+            'destination':'University of New South Wales, Kensington NSW 2052, Australia','mode':'transit','data':self.payload})
+        with patch.object(self.pool.http,'get',side_effect=AssertionError('Reviewed response must not make another request')):
+            self.assertEqual(self.pool.calculate(self.prop,'UNSW'),23)
+        self.assertEqual(self.state.db.execute('SELECT status FROM calls').fetchone()[0],'DISTANCE_ORIGIN_NOT_EXACT')
+        self.assertAlmostEqual(self.state.credit_budget_summary()['spent_or_reserved_usd'],.002)
+
     def test_non_success_or_empty_element_is_held_without_another_http(self):
         payload=copy.deepcopy(self.payload);payload['rows']=[]
         sent=[]
