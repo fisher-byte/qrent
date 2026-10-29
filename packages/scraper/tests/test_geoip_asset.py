@@ -4,6 +4,7 @@ import io
 import json
 from pathlib import Path
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -77,6 +78,24 @@ class GeoIPAssetTests(unittest.TestCase):
                     with self.assertRaises(RuntimeError):self.helper()(self.geo(path,True))
             self.assertEqual(len(seen),1)
             self.assertFalse(path.exists())
+
+    def test_deadline_interrupts_a_stream_before_its_next_chunk_and_retains_old_data(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path=Path(temp)/'geo.mmdb';path.write_bytes(b'old-valid-db')
+            response=self.response()
+            def slow_chunks(size):
+                yield b'abcd'
+                time.sleep(.4)
+                yield b'late'
+            response.iter_content=slow_chunks
+            started=time.monotonic()
+            with patch('requests.Session.get',return_value=response):
+                result=self.helper()(self.geo(path,True),max_seconds=.03)
+            self.assertLess(time.monotonic()-started,.25)
+            self.assertEqual(result['status'],'cached_after_refresh_failure')
+            self.assertEqual(result['download_bytes'],4)
+            self.assertEqual(path.read_bytes(),b'old-valid-db')
+            self.assertFalse(any(Path(temp).glob('.geoip-fetch-*')))
 
 
 if __name__=='__main__':unittest.main()

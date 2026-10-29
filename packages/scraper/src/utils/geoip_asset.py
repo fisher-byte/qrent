@@ -1,9 +1,13 @@
 """Bound Camoufox's optional data download to ordinary egress, never residential traffic."""
 import json
+from contextlib import contextmanager
+import math
 import os
 from pathlib import Path
 import shutil
+import signal
 import tempfile
+import threading
 import time
 from urllib.parse import urlsplit
 import zipfile
@@ -11,9 +15,27 @@ import zipfile
 import requests
 
 
-def ensure_geoip_asset(geo,*,proxy='socks5h://127.0.0.1:18082',ip=None):
+@contextmanager
+def download_deadline(seconds):
+    # requests' read timeout starts again after every packet. A real alarm also
+    # interrupts a trickling response before iter_content yields its next chunk.
+    if threading.current_thread() is not threading.main_thread() or any(signal.getitimer(signal.ITIMER_REAL)):
+        raise RuntimeError('GeoIP download requires an available main-thread deadline')
+    previous=signal.getsignal(signal.SIGALRM)
+    def expired(signum,frame):raise TimeoutError('GeoIP download deadline reached')
+    signal.signal(signal.SIGALRM,expired)
+    signal.setitimer(signal.ITIMER_REAL,seconds)
+    try:yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL,0)
+        signal.signal(signal.SIGALRM,previous)
+
+
+def ensure_geoip_asset(geo,*,proxy='socks5h://127.0.0.1:18082',ip=None,max_seconds=240):
     if proxy!='socks5h://127.0.0.1:18082':
         raise ValueError('Use the verified ordinary GeoIP asset egress')
+    if not math.isfinite(max_seconds) or not 0<max_seconds<=240:
+        raise ValueError('GeoIP download deadline must be within 240 seconds')
     config=geo.load_geoip_config()
     version='ipv6' if ip and ':' in ip else 'ipv4'
     path=Path(geo.get_mmdb_path(version,config))
@@ -40,11 +62,11 @@ def ensure_geoip_asset(geo,*,proxy='socks5h://127.0.0.1:18082',ip=None):
     # A single bounded source attempt per capture; the next day may try again.
     url=urls[0]
     if urlsplit(url).scheme!='https':raise ValueError('GeoIP assets require HTTPS')
+    downloaded=0
     try:
-        downloaded=0;started=time.monotonic()
         with tempfile.TemporaryDirectory(prefix='.geoip-fetch-',dir=path.parent) as temp:
             archive=Path(temp)/'download';candidate=Path(temp)/'new.mmdb'
-            with requests.Session() as http:
+            with download_deadline(max_seconds),requests.Session() as http:
                 http.trust_env=False
                 http.proxies.update({'http':proxy,'https':proxy})
                 with http.get(url,stream=True,timeout=(15,45)) as response:
@@ -54,7 +76,7 @@ def ensure_geoip_asset(geo,*,proxy='socks5h://127.0.0.1:18082',ip=None):
                     with archive.open('wb') as sink:
                         for part in response.iter_content(1024*1024):
                             downloaded+=len(part)
-                            if downloaded>128*1024*1024 or time.monotonic()-started>240:
+                            if downloaded>128*1024*1024:
                                 raise RuntimeError('GeoIP download bound reached')
                             sink.write(part)
             if config.get('extract'):
@@ -75,5 +97,5 @@ def ensure_geoip_asset(geo,*,proxy='socks5h://127.0.0.1:18082',ip=None):
             # Camoufox defines mtime as the last refresh check, not build time.
             # Preserve the real build epoch and usable data after an outage.
             os.utime(path,None)
-            return {'status':'cached_after_refresh_failure','build_epoch':existing.build_epoch,'download_bytes':0}
+            return {'status':'cached_after_refresh_failure','build_epoch':existing.build_epoch,'download_bytes':downloaded}
         raise RuntimeError('GeoIP asset unavailable after a bounded ordinary-egress attempt') from None
