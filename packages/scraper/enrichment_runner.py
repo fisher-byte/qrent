@@ -152,6 +152,7 @@ def enrich(properties, state, *, use_api=False, max_model_calls=16, max_maps_cal
                 'maps_pool_entries': len(maps.keys), 'maps_errors': maps.errors, 'api_usage': state.summary(),
                 'monthly_budget': state.budget_summary(), 'commute_required_pairs':commute_required,
                 'model_budget':state.model_budget_summary(),
+                'provider_credit_budget':state.credit_budget_summary(),
                 'score_required_records':score_required,'score_complete_records':score_complete,
                 'model_call_cache_hits':scorer.cache_hits,
                 'model_provider_error':model_provider_error,

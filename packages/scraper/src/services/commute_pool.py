@@ -13,6 +13,7 @@ from .commute import CommuteService
 from .enrichment_state import APILimitReached
 from .publication import has_routable_address
 from .nsw_transit import NSWTransit
+from .distance_transit import DistanceTransit
 from .address_identity import normalized_address
 
 
@@ -23,6 +24,10 @@ def load_pool(path=None):
     if mode == 'nsw':
         key = os.getenv('NSW_API_KEY')
         return [{'api_key': key, 'billing_group': 'tfnsw-account', 'provider': 'nsw'}] if key else []
+    if mode=='distancematrix':
+        key=os.getenv('DISTANCE_MATRIX_API_KEY')
+        return [{'api_key':key,'billing_group':'distancematrix-growth-account',
+                 'provider':'distancematrix'}] if key else []
     if mode != 'google':
         raise ValueError('Provider not enabled; no automatic paid or bonus fallback')
     path = path or os.getenv('GOOGLE_MAPS_POOL_FILE')
@@ -79,6 +84,26 @@ class CommutePool:
         if cached:
             self.cache_hits += 1
             return cached['minutes']
+        if self.keys and self.keys[0]['provider']=='distancematrix':
+            entry=self.keys[0]
+            if prop.state!='NSW' or entry['billing_group'] in self.disabled:
+                return None
+            try:
+                minutes=DistanceTransit(self.state,self.http,entry['api_key'],self.max_calls).calculate(
+                    prop,destination,departure,key)
+                if minutes is not None:
+                    self.state.put(key,{'minutes':minutes,'mode':'transit','provider':'distancematrix',
+                        'attribution':'Distancematrix.ai Accurate',
+                        'requested_at':datetime.now(timezone.utc).isoformat()})
+                return minutes
+            except Exception as exc:
+                message=str(exc) if isinstance(exc,(RuntimeError,APILimitReached)) else type(exc).__name__
+                self.errors.append({'provider':'distancematrix','source':prop.source.value,
+                                    'house_id':prop.house_id,'school':school,'error':message})
+                if isinstance(exc,APILimitReached) or message.startswith('DISTANCE_HTTP_') or message in {
+                        'ReadTimeout','ConnectTimeout','ConnectionError','DISTANCE_INVALID_RESPONSE'}:
+                    self.disabled.add(entry['billing_group'])
+                return None
         if self.keys and self.keys[0]['provider'] == 'nsw':
             group=self.keys[0]['billing_group']
             if group in self.disabled:

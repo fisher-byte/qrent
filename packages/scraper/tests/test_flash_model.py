@@ -10,7 +10,8 @@ from enrichment_runner import enrich, model_cost_cny
 from src.config import ScoringConfig
 from src.models import PropertyData, PropertySource
 from src.services.enrichment_state import APILimitReached, EnrichmentState
-from src.services.scoring import ScoringService
+from src.services.scoring import ScoringService, KEYWORDS_CN_SYSTEM_PROMPT
+from src.services.publication import chinese_keywords_valid
 
 
 PINNED_FLASH='qwen3.7-flash-2026-07-15'
@@ -63,6 +64,31 @@ class FlashModelTests(unittest.TestCase):
     def test_pinned_flash_price_does_not_silently_enter_a_higher_input_tier(self):
         self.assertAlmostEqual(model_cost_cny(PINNED_FLASH,1000,150),.00032)
         with self.assertRaises(APILimitReached):model_cost_cny(PINNED_FLASH,32001,150)
+
+    def test_an_english_feature_list_with_one_chinese_suffix_is_not_chinese_keywords(self):
+        self.assertFalse(chinese_keywords_valid('23层, park views, large balcony, open kitchen, dishwasher, secure parking'))
+        self.assertTrue(chinese_keywords_valid('采光充足, 大阳台, Miele厨电, 安全停车位'))
+
+    def test_chinese_repair_reuses_scores_english_and_the_existing_original_response(self):
+        service=ScoringService(ScoringConfig(api_key='test',model_name=PINNED_FLASH),
+            call_guard=lambda *args:self.state.reserve('model',PINNED_FLASH,5,cny_ceiling=.01),
+            call_observer=self.state.finish,response_cache=self.state)
+        prop=PropertyData(house_id='123',source=PropertySource.DOMAIN,
+            description_en='An apartment on level 23 with park views, balcony and Miele appliances.',
+            average_score=14,scores=[14]*8,keywords='park views, balcony, Miele appliances')
+        replies=iter(['23层, park views, balcony, open kitchen, dishwasher, secure parking',
+                      '23层公寓, 公园景观, 阳台, Miele厨电'])
+        sent=[]
+        def send(session,request,**kwargs):
+            sent.append(json.loads(request.body))
+            return api_response(request,[{'text':next(replies)}])
+        with patch('requests.sessions.Session.send',autospec=True,side_effect=send),patch('src.services.scoring.time.sleep'):
+            service._call_model(KEYWORDS_CN_SYSTEM_PROMPT,prop.description_en)
+            service.process_property(prop)
+        self.assertEqual(prop.description_cn,'23层公寓, 公园景观, 阳台, Miele厨电')
+        self.assertEqual((prop.average_score,prop.scores,prop.keywords),(14,[14]*8,'park views, balcony, Miele appliances'))
+        self.assertEqual(len(sent),2)
+        self.assertEqual(self.state.db.execute('SELECT COUNT(*) FROM calls').fetchone()[0],2)
 
     def test_completed_previous_model_fields_are_reused_without_a_new_request(self):
         prop=PropertyData(house_id='123',source=PropertySource.DOMAIN,

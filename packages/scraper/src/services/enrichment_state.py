@@ -39,6 +39,8 @@ class EnrichmentState:
                 microusd INTEGER NOT NULL, note TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS model_budget_events (event TEXT PRIMARY KEY, period TEXT NOT NULL,
                 microcny INTEGER NOT NULL, note TEXT NOT NULL, legacy_usd_event TEXT UNIQUE);
+            CREATE TABLE IF NOT EXISTS provider_credit_events (event TEXT PRIMARY KEY,
+                service TEXT NOT NULL, quota_group TEXT NOT NULL, microcredit INTEGER NOT NULL);
         ''')
         # Preserve every original USD row and call. The old model guard used
         # USD 0.20 per CNY as a conservative ceiling; translate its reserves
@@ -97,9 +99,24 @@ class EnrichmentState:
             self.db.execute('INSERT OR REPLACE INTO cache VALUES (?,?,?)',
                             (key, json.dumps(value, ensure_ascii=False), float('inf') if ttl is None else time.time() + ttl))
 
-    def reserve(self, service, group, run_limit, monthly_limit=None, usd_ceiling=0, *, cny_ceiling=0):
+    def reserve_credit(self, service, group, run_limit, usd_ceiling, lifetime_limit=40):
+        if service!='distancematrix' or group!='distancematrix-growth-account' or usd_ceiling<=0:
+            raise ValueError('Only the verified Distance Matrix gift account is allowed')
+        return self.reserve(service,group,run_limit,credit_usd_ceiling=usd_ceiling,
+                            credit_lifetime_limit=lifetime_limit)
+
+    def credit_budget_summary(self):
+        used=self.db.execute('SELECT COALESCE(SUM(microcredit),0) FROM provider_credit_events').fetchone()[0]
+        return {'lifetime_ceiling_usd':40,'spent_or_reserved_usd':used/1000000,
+                'remaining_usd':max(0,40000000-used)/1000000,'cash_allowed_usd':0}
+
+    def reserve(self, service, group, run_limit, monthly_limit=None, usd_ceiling=0, *, cny_ceiling=0,
+                credit_usd_ceiling=0, credit_lifetime_limit=40):
         if service=='model' and usd_ceiling or service!='model' and cny_ceiling:
             raise ValueError('Model requests use cny_ceiling; other services use usd_ceiling')
+        if (service=='distancematrix' and (credit_usd_ceiling<=0 or usd_ceiling or group!='distancematrix-growth-account')
+                or credit_usd_ceiling and service!='distancematrix'):
+            raise ValueError('Gift requests cannot fall back to cash')
         # Count failed/uncertain requests conservatively, since timeouts may
         # already have reached the supplier. Keys sharing billing share limits.
         zone = (ZoneInfo('Australia/Sydney') if service == 'nsw' else
@@ -119,16 +136,25 @@ class EnrichmentState:
             amount = self.microusd(cny_ceiling if service=='model' else usd_ceiling)
             if amount < 0:
                 raise ValueError('Request reservation cannot be negative')
+            credit=self.microusd(credit_usd_ceiling)
+            if credit:
+                used=self.db.execute('SELECT COALESCE(SUM(microcredit),0) FROM provider_credit_events').fetchone()[0]
+                cap=min(40000000,max(0,self.microusd(credit_lifetime_limit)))
+                if used+credit>cap:
+                    raise APILimitReached('USD 40 lifetime gift budget reached; cash fallback disabled')
             if service=='model':
                 total=self.db.execute('SELECT COALESCE(SUM(microcny),0) FROM model_budget_events WHERE period=?',
                                       (budget_period,)).fetchone()[0]
                 if total+amount>self.model_cap_microcny:
                     raise APILimitReached('CNY 50 monthly model budget reached')
-            elif self._usd_used(budget_period)+amount>self.cap_microusd:
+            elif not credit and self._usd_used(budget_period)+amount>self.cap_microusd:
                 raise APILimitReached('USD 4 monthly operational budget reached')
             cursor = self.db.execute('INSERT INTO calls (run,service,quota_group,period,status) VALUES (?,?,?,?,?)',
                                      (self.run_id, service, group, period, 'reserved'))
-            if service=='model':
+            if credit:
+                self.db.execute('INSERT INTO provider_credit_events VALUES (?,?,?,?)',
+                    ('request:'+str(cursor.lastrowid),service,group,credit))
+            elif service=='model':
                 self.db.execute('INSERT INTO model_budget_events VALUES (?,?,?,?,NULL)',
                     ('request:'+str(cursor.lastrowid),budget_period,amount,'Native CNY model request reservation'))
             else:

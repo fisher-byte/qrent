@@ -293,8 +293,10 @@ class ScoringService:
             # Preserve the original response and valid score/English caches.
             # One separately keyed correction repairs only the invalid field.
             response=self._call_model(KEYWORDS_CN_SYSTEM_PROMPT+
-                '\n必须使用简体中文输出每个关键词，禁止整段英文；地点和品牌名称可保留英文。',
-                description,cache_slot='keywords-cn-repair-v1')
+                '\n每个描述性关键词必须翻译为简体中文，只有专有地名和品牌可保留英文。'
+                '请将 balcony、dishwasher、park views 等普通英文词翻译为中文。'
+                '从原文提取最多11个关键词，不添加原文没有的设施，只输出中文关键词列表。',
+                description,cache_slot='keywords-cn-repair-v2')
         if response and not chinese_keywords_valid(response):
             return ''
         if response:

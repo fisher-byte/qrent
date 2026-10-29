@@ -13,7 +13,10 @@ SOURCE_HOSTS = {'domain': 'domain.com.au', 'realestate': 'realestate.com.au'}
 
 
 def chinese_keywords_valid(value):
-    return bool(re.search(r'[\u4e00-\u9fff]',value or ''))
+    value=value or ''
+    chinese=len(re.findall(r'[\u4e00-\u9fff]',value))
+    letters=len(re.findall(r'[a-zA-Z]',value))
+    return chinese>=2 and chinese/(chinese+letters)>=.15
 
 
 def ai_field_errors(prop):
