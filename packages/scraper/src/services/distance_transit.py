@@ -1,6 +1,7 @@
 """Explicit 1x1 Accurate transit requests against the existing non-cash gift."""
 import math
 import re
+import hashlib
 
 from .address_identity import normalized_address
 from .nsw_transit import building_address
@@ -25,10 +26,13 @@ class DistanceTransit:
 
     def __init__(self,state,session,key,max_calls):
         self.state,self.http,self.api_key,self.max_calls=state,session,key,max_calls
+        self.provider_hold=state.key('distancematrix-provider-hold-v1',hashlib.sha256(key.encode()).hexdigest())
 
     def calculate(self,prop,destination,departure,pair_key):
         if prop.state!='NSW':
             return None
+        if self.state.get(self.provider_hold):
+            raise DistanceTransitError('DISTANCE_PROVIDER_HELD_FOR_REVIEW')
         attempt=self.state.key('distancematrix-pair-attempt-v1',pair_key)
         if self.state.get(attempt):
             raise DistanceTransitError('DISTANCE_PREVIOUS_ATTEMPT_REQUIRES_REVIEW')
@@ -67,4 +71,7 @@ class DistanceTransit:
         except Exception as exc:
             code=str(exc) if isinstance(exc,DistanceTransitError) else type(exc).__name__
             self.state.finish(request_id,code)
+            if code.startswith('DISTANCE_HTTP_') or code in {'ReadTimeout','ConnectTimeout',
+                    'ConnectionError','JSONDecodeError','DISTANCE_INVALID_RESPONSE'}:
+                self.state.put(self.provider_hold,{'request_id':request_id,'reason':code})
             raise DistanceTransitError(code) from None

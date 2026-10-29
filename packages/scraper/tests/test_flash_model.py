@@ -114,5 +114,27 @@ class FlashModelTests(unittest.TestCase):
         self.assertEqual(second['records'][0]['ai_model'],'qwen-plus')
         self.assertEqual(self.state.db.execute('SELECT COUNT(*) FROM calls').fetchone()[0],4)
 
+    def test_model_rotation_reuses_a_finished_rating_slot_from_an_interrupted_evaluation(self):
+        def scorer(model,limit):
+            return ScoringService(ScoringConfig(api_key='offline-key',model_name=model),
+                call_guard=lambda *args:self.state.reserve('model',model,limit,cny_ceiling=.01),
+                call_observer=self.state.finish,response_cache=self.state)
+        wires=[]
+        def old_send(session,request,**kwargs):
+            wires.append(json.loads(request.body)['model'])
+            return api_response(request,'\n'.join(['总评分：14']*4))
+        with patch('requests.sessions.Session.send',autospec=True,side_effect=old_send),patch('src.services.scoring.time.sleep'):
+            with self.assertRaises(APILimitReached):scorer('qwen-plus',1).score_property('Same sunny apartment.')
+        def new_send(session,request,**kwargs):
+            wires.append(json.loads(request.body)['model'])
+            return api_response(request,[{'text':'\n'.join(['总评分：16']*4)}])
+        rotated=scorer(PINNED_FLASH,10)
+        self.state.run_id='rotated-run'
+        with patch('requests.sessions.Session.send',autospec=True,side_effect=new_send),patch('src.services.scoring.time.sleep'):
+            average,scores=rotated.score_property('Same sunny apartment.')
+        self.assertEqual((average,scores),(15,[14]*4+[16]*4))
+        self.assertEqual(wires,['qwen-plus',PINNED_FLASH])
+        self.assertEqual(rotated.response_models,{'qwen-plus',PINNED_FLASH})
+
 
 if __name__=='__main__':unittest.main()

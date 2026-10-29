@@ -64,15 +64,15 @@ def ready_subset(properties,result):
 
 
 def runner_command(release,state,input_path,cohorts,output,count,stage,mysql_env):
-    if stage not in {'score','commute','audit','publish'} or not 0<count<=50:
+    if stage not in {'score','commute','bonus','audit','publish'} or not 0<count<=50:
         raise ValueError('Invalid bounded queue stage')
     cmd=[str(release/'.venv/bin/python'),'-u',str(release/'enrichment_runner.py'),
          '--input',str(input_path),'--cohorts',str(cohorts),'--output',str(output),
          '--state',str(state),'--enrich','--limit',str(count),
          '--max-model-calls',str(count*5 if stage=='score' else 0),
-         '--max-maps-calls','2000' if stage=='commute' else '0']
+         '--max-maps-calls',str(2000 if stage=='commute' else count*3 if stage=='bonus' else 0)]
     if stage=='score':cmd.append('--score-only')
-    if stage=='commute':cmd.append('--commute-only')
+    if stage in {'commute','bonus'}:cmd.append('--commute-only')
     if stage=='publish':cmd.extend(['--publish','--mysql-env',str(mysql_env)])
     return cmd
 
@@ -97,6 +97,7 @@ def run_step(job,folder,count,stage,environment,input_path=None,cohorts=None):
     wait_for_free_queue(job)
     verify_sources(job)
     release=Path(job['release']);stage_out=folder/stage
+    if stage=='bonus':environment=dict(environment,COMMUTE_PROVIDER='distancematrix')
     cmd=runner_command(release,Path(job['state']),input_path or folder/'input.json',
         cohorts or folder/'cohorts.json',stage_out,count,stage,Path(job['mysql_env']))
     with (folder/(stage+'.log')).open('a') as log:
@@ -115,8 +116,12 @@ def main():
     parser.add_argument('job',type=Path)
     parser.add_argument('--cache-only',action='store_true')
     parser.add_argument('--nsw-free',action='store_true',help='Fill missing routes using only the free NSW provider')
+    parser.add_argument('--skip-model',action='store_true',help='Use existing model results while still allowing explicitly enabled transit')
+    parser.add_argument('--bonus-fallback',action='store_true',help='After NSW, explicitly fill missing pairs from the capped existing gift')
     args=parser.parse_args()
     if args.nsw_free and args.cache_only:parser.error('--cache-only cannot request NSW routes')
+    if args.bonus_fallback and (args.cache_only or not args.nsw_free):
+        parser.error('--bonus-fallback requires --nsw-free and cannot combine with --cache-only')
     os.umask(0o077)
     job=json.loads(args.job.read_text());release=Path(job['release'])
     if release.resolve()!=Path(__file__).resolve().parents[1] or Path(job['state']).resolve()!=OFFICIAL_STATE:
@@ -156,7 +161,8 @@ def main():
             receipt=json.loads(receipt_path.read_text())
         else:
             if args.nsw_free:run_step(job,folder,len(batch),'commute',environment)
-            score=None if args.cache_only else run_step(job,folder,len(batch),'score',environment)
+            if args.bonus_fallback:run_step(job,folder,len(batch),'bonus',environment)
+            score=None if args.cache_only or args.skip_model else run_step(job,folder,len(batch),'score',environment)
             audit=run_step(job,folder,len(batch),'audit',environment)
             enriched=json.loads((folder/'audit/properties.json').read_text())
             ready=ready_subset(enriched,audit)
@@ -186,8 +192,9 @@ def main():
     summary={'status':'processed','addresses':len(properties),
              'published_addresses':sum(r['published_addresses'] for r in receipts),'held_addresses':len(held),
              'batch_count':len(receipts),'cash_commute_requests_allowed':0,
-             'model_requests_allowed':not args.cache_only,
+             'model_requests_allowed':not (args.cache_only or args.skip_model),
              'nsw_free_enabled':args.nsw_free,
+             'bonus_fallback_enabled':args.bonus_fallback,
              'held_input_sha256':hashlib.sha256((output/'held-input.json').read_bytes()).hexdigest(),
              'held_cohorts_sha256':hashlib.sha256((output/'held-cohorts.json').read_bytes()).hexdigest(),
              'completed_at':datetime.now(timezone.utc).isoformat()}

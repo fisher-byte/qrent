@@ -72,6 +72,8 @@ def enrich(properties, state, *, use_api=False, max_model_calls=16, max_maps_cal
     try:
         for prop in properties:
             errors = []
+            source_models=set()
+            scorer.response_models.clear()
             schools = ((school_targets or {}).get((prop.source.value, prop.house_id))
                        if school_targets is not None else schools_for_property(prop)) or []
             schools = [school for school in schools if school in SCHOOLS.get(prop.state, [])]
@@ -102,6 +104,7 @@ def enrich(properties, state, *, use_api=False, max_model_calls=16, max_maps_cal
             if cached:
                 for name in AI_FIELDS:
                     setattr(prop, name, cached[name])
+                source_models.update(cached.get('source_models') or [cache_model])
             elif use_api:
                 # Unproven historical values cannot count as this evaluation.
                 for name in AI_FIELDS:
@@ -124,7 +127,9 @@ def enrich(properties, state, *, use_api=False, max_model_calls=16, max_maps_cal
                     errors.append(str(exc))
                 finally:
                     # Resume completed stages if a later stage reaches its cap.
-                    state.put(key, {name: getattr(prop, name) for name in AI_FIELDS})
+                    source_models.update(scorer.response_models)
+                    state.put(key, {**{name: getattr(prop, name) for name in AI_FIELDS},
+                                    'source_models':sorted(source_models)})
             for school in schools:
                 if use_api and can_enrich and not score_only and not model_provider_error:
                     minutes = maps.calculate(prop, school)
@@ -140,7 +145,8 @@ def enrich(properties, state, *, use_api=False, max_model_calls=16, max_maps_cal
             else:
                 blocked_inputs += 1
             records.append({'source': prop.source.value, 'house_id': prop.house_id, 'state': prop.state,
-                            'ai_cache_key': key, 'ai_model':cache_model, 'schools': schools, 'checks': checks, 'input_errors': input_errors,
+                            'ai_cache_key': key, 'ai_model':next(iter(source_models)) if len(source_models)==1 else 'mixed' if source_models else cache_model,
+                            'ai_models':sorted(source_models),'schools': schools, 'checks': checks, 'input_errors': input_errors,
                             'errors': errors})
             if progress:
                 progress({'processed_addresses':len(records),'selected_addresses':len(properties),

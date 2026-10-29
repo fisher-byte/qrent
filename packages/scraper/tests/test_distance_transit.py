@@ -98,6 +98,20 @@ class DistanceTransitTests(unittest.TestCase):
             self.assertIsNone(self.pool.calculate(self.prop,'UNSW'))
         self.assertEqual(sent,[])
 
+    def test_provider_rejection_stops_other_addresses_after_restart(self):
+        sent=[]
+        response=self.response();response.status_code=403
+        with patch.object(self.pool.http,'get',side_effect=lambda *a,**k:(sent.append(1) or response)):
+            self.assertIsNone(self.pool.calculate(self.prop,'UNSW'))
+        self.pool.close();self.state.close()
+        self.state=EnrichmentState(self.path,'next-batch')
+        self.pool=CommutePool(self.state,keys=self.keys,max_calls=10)
+        other=copy.copy(self.prop);other.address_line1='4/20 George Street'
+        with patch.object(self.pool.http,'get',side_effect=lambda *a,**k:(sent.append(1) or response)):
+            self.assertIsNone(self.pool.calculate(other,'UNSW'))
+        self.assertEqual(len(sent),1)
+        self.assertAlmostEqual(self.state.credit_budget_summary()['spent_or_reserved_usd'],.002)
+
     def test_wrong_origin_is_not_published_as_an_exact_address(self):
         payload=copy.deepcopy(self.payload)
         payload['origin_addresses']=['20 George St, Redfern NSW 2016, Australia']

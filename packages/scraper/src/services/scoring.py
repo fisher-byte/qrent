@@ -112,6 +112,7 @@ class ScoringService:
         self.call_observer = call_observer
         self.response_cache=response_cache
         self.cache_hits=0
+        self.response_models=set()
         api_key = (
             self.config.api_key
             or getattr(settings, "env_property_rating_api_key", None)
@@ -140,8 +141,19 @@ class ScoringService:
             cache_key=self.response_cache.key('model-response-v1',self.config.model_name,
                 system_prompt,user_prompt,self.config.temperature,self.config.max_tokens,.9,False,cache_slot)
             cached=self.response_cache.get(cache_key)
+            cached_model=self.config.model_name
+            if not cached:
+                for model in ('qwen-plus','qwen-flash',*sorted(MULTIMODAL_FLASH_MODELS)):
+                    if model==self.config.model_name:continue
+                    previous_key=self.response_cache.key('model-response-v1',model,
+                        system_prompt,user_prompt,self.config.temperature,self.config.max_tokens,.9,False,cache_slot)
+                    previous=self.response_cache.get(previous_key)
+                    if previous and isinstance(previous.get('text'),str) and previous['text'].strip():
+                        cached,cached_model=previous,model
+                        break
             if cached:
                 self.cache_hits+=1
+                self.response_models.add(cached.get('model',cached_model))
                 return cached['text']
             held=self.response_cache.get(self.provider_hold_key)
             if held:
@@ -191,8 +203,9 @@ class ScoringService:
                     if not isinstance(content,str) or not content.strip():
                         raise ValueError('Empty model response')
                     if self.response_cache is not None:
-                        self.response_cache.put(cache_key,{'text':content,'request_id':request_id})
+                        self.response_cache.put(cache_key,{'text':content,'request_id':request_id,'model':self.config.model_name})
                         self.response_cache.put(attempt_key,{'request_id':request_id,'status':'OK'})
+                    self.response_models.add(self.config.model_name)
                     return content
                 else:
                     logger.error('Model API rejected request: %s',response.code)

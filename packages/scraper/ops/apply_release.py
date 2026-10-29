@@ -18,6 +18,17 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
 
 
+def offline_test_environment(path):
+    # Legacy modules also load .env directly. Explicit defaults prevent those
+    # imports from selecting a different SDK branch or restoring a live key.
+    values={name:'' for name in ('GOOGLE_MAPS_API_KEY','NSW_API_KEY','DASHSCOPE_API_KEY',
+        'PROPERTY_RATING_API_KEY','QWEN_API_KEY','DISTANCE_MATRIX_API_KEY')}
+    values.update(COMMUTE_PROVIDER='google',QWEN_MODEL='qwen-plus',
+                  DASHSCOPE_HTTP_BASE_URL='https://dashscope.aliyuncs.com/api/v1')
+    path.write_text('\n'.join(k+'='+v for k,v in values.items())+'\n')
+    return dict(os.environ,SCRAPER_ENV_FILE=str(path),**values)
+
+
 def apply(archive, expected_sha, root):
     os.umask(0o077)
     release = root / 'releases/recovery-20261027'
@@ -55,11 +66,7 @@ def apply(archive, expected_sha, root):
             # Acceptance tests must not inherit live credentials or consume
             # model/map allowance. The active private environment is untouched.
             offline = backup / 'offline-test.env'
-            credentials = ('GOOGLE_MAPS_API_KEY','NSW_API_KEY','DASHSCOPE_API_KEY',
-                           'PROPERTY_RATING_API_KEY','QWEN_API_KEY')
-            offline.write_text('\n'.join(name+'=' for name in credentials) + '\nCOMMUTE_PROVIDER=google\n')
-            environment = dict(os.environ, SCRAPER_ENV_FILE=str(offline), COMMUTE_PROVIDER='google',
-                               **{name:'' for name in credentials})
+            environment = offline_test_environment(offline)
             with (backup / 'tests.log').open('w') as log:
                 tests = subprocess.run([str(release / '.venv/bin/python'), '-m', 'unittest', 'discover', '-s', 'tests', '-v'],
                     cwd=release, env=environment, stdout=log, stderr=subprocess.STDOUT, timeout=240)

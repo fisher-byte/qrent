@@ -51,6 +51,17 @@ class EnrichmentQueueTests(unittest.TestCase):
             save_frozen(path,[{'source':'domain','house_id':'1'}])
             with self.assertRaises(ValueError):save_frozen(path,[{'source':'domain','house_id':'2'}])
 
+    def test_explicit_bonus_stage_has_no_model_or_publish_permission(self):
+        try:
+            cmd=runner_command(Path('/release'),Path('/official.db'),Path('/in'),
+                Path('/roles'),Path('/out'),7,'bonus',Path('/writer.env'))
+        except ValueError:
+            self.fail('The explicitly enabled bonus transit stage is missing')
+        self.assertEqual(cmd[cmd.index('--max-model-calls')+1],'0')
+        self.assertEqual(cmd[cmd.index('--max-maps-calls')+1],'21')
+        self.assertIn('--commute-only',cmd)
+        self.assertNotIn('--publish',cmd)
+
     def test_cache_only_queue_publishes_complete_subset_and_restart_skips_it(self):
         with tempfile.TemporaryDirectory() as temp:
             folder=Path(temp);release=Path(__file__).resolve().parents[1]
@@ -82,6 +93,38 @@ class EnrichmentQueueTests(unittest.TestCase):
             result=json.loads((folder/'output/result.json').read_text())
             self.assertEqual((result['published_addresses'],result['held_addresses']),(1,1))
             self.assertEqual(json.loads((folder/'output/held-input.json').read_text()),[properties[1]])
+
+    def test_skipping_models_still_runs_free_transit_bonus_and_complete_cache_publication(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder=Path(temp);release=Path(__file__).resolve().parents[1]
+            props=[{'source':'domain','house_id':'1','state':'NSW',
+                'address_line1':'1 Example Street','address_line2':'newtown-nsw-2042'}]
+            targets={('domain','1'):['UNSW']}
+            save_frozen(folder/'input.json',props);save_frozen(folder/'cohorts.json',cohort_subset(props,targets))
+            state=folder/'state.db'
+            job={'release':str(release),'state':str(state),'source_hashes':{},
+                'input':str(folder/'input.json'),'cohorts':str(folder/'cohorts.json'),
+                'output':str(folder/'output'),'mysql_env':str(folder/'writer.env'),'batch_size':1}
+            for name in ('input','cohorts'):job[name+'_sha256']=hashlib.sha256(Path(job[name]).read_bytes()).hexdigest()
+            save_frozen(folder/'job.json',job)
+            stages=[]
+            def step(job,batch,count,stage,environment,*args):
+                stages.append(stage)
+                self.assertNotEqual(stage,'score')
+                if stage in ('commute','bonus'):return {'status':'commute_complete'}
+                if stage=='publish':return {'publication':{'UNSW':{'inserted':1,'updated':0,'errors':0}}}
+                save_frozen(batch/'audit/properties.json',props)
+                return {'model_budget':{'remaining_cny':50},'records':[
+                    {'source':'domain','house_id':'1','schools':['UNSW'],'input_errors':[],'checks':{'UNSW':[]}}]}
+            with patch('sys.argv',['queue',str(folder/'job.json'),'--skip-model','--nsw-free','--bonus-fallback']), \
+                    patch('ops.enrichment_queue.OFFICIAL_STATE',state.resolve()), \
+                    patch('ops.enrichment_queue.run_step',side_effect=step),redirect_stdout(io.StringIO()):
+                try:main()
+                except SystemExit:self.fail('The model-free daily path is missing')
+            self.assertEqual(stages,['commute','bonus','audit','publish'])
+            result=json.loads((folder/'output/result.json').read_text())
+            self.assertFalse(result['model_requests_allowed'])
+            self.assertEqual((result['published_addresses'],result['held_addresses']),(1,0))
 
 
 if __name__=='__main__':unittest.main()
