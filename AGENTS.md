@@ -16,7 +16,7 @@
 - 本地 `packages/scraper/output/enrichment-validation-20261029/enrichment-cache.db` 是历史验证快照。本地提供商 Key 已置空，避免两个主机各用一份账本发请求。服务器私有 `.env` 保存已验证的 Maps/Qwen 配置；不进入 Git。
 - Maps 普通香港出口为 `socks5h://127.0.0.1:18082`，由 `qrent-maps-egress.service` 复用既有服务器间 SSH 访问；不依赖本机在线。**18080 是旧 LycheeIP 住宅代理链路，不用于 Maps。**
 - 成功通勤按完整地址（保留房号、门牌区间）与校区跨来源复用，不因普通重跑、进程重启或跨月自动重算。模型按完整描述、提示词和配置复用。金额和请求在 HTTP 前预留，失败/不确定请求不抹账。
-- 悉尼线上 MySQL 连接只在私有根 `.env`；不要把 root 数据库凭据复制到爬虫机。自动生产写入需要单独配置受限写入身份，当前尚未接到每日发布。
+- 悉尼线上 MySQL root 连接只在私有根 `.env`；不要复制到爬虫机。自动写入现用私有 `enrichment/qrent-writer.env` 的受限身份，只能写房源相关 4 表、只读 schools，无用户/收藏/删除/改表权限；仅允许现有香港出口。`qrent-mysql-egress.service` 经现有 SSH 监听 127.0.0.1:13306，保留 MySQL TLS 与压缩，不依赖本机或住宅代理。
 
 ## 数据与部署
 
@@ -33,6 +33,10 @@
 - 悉尼原区域修复 `20fd6f3` 已于 10 月 29 日 14:25 经 206 项服务器检查部署；根每日入口仅悉尼、每区 7 页、住宅流量最多 150MB，不自动充值。Sydney City 原配置保持，REA 查询规范化为邮编 2000；同邮编 URL 合并后为 Domain 22 / REA 19 个查询。
 - 本次悉尼剩余免费队列在 `/root/qrent-scraper/output/free-transit-batch-20261029/remaining-free-queue`。两次一次性服务器任务分别为 10 月 29、30 日北京时间 15:05，受 `ops/guarded_free_batch.py` 检查当前源文件、已有 Google 日/月占用和上一批结果，每批最多 280 新请求、模型 0、禁止发布，复用同一正式账本。前一批发生提供商错误时停止复跑；不把 timer active 或 exit 2 当作全部成功。读取实际 `batch-a/b/result.json` 与最新缓存探针确认进度。
 - 模型已获单独每月人民币 50 元授权，不再等待是否完全免费的澄清。仅通过正式账本 `--score-only` 分批执行；完整描述、提示词、配置和评分槽位的成功结果可复用，失败/不确定调用保留待复核，不自动重复收费。更新源文件后必须同步检查现有免费队列的源码校验清单，保持通勤模型调用上限 0。
+- 当前源码 `efc9289` 已经 227 项本机/服务器检查部署；`ops/enrichment_queue.py` 每批最多 50 条，评分与审查/发布分离，审查/发布两类 API 上限均为 0。错误语言只修对应中文字段；已出租、纯联系描述、冲突或缺字段的记录不能发布。
+- 首次悉尼队列为 `qrent-sydney-model-full-20261029.service`，输出 `output/model-enrichment-20261029/full-queue`；2,681 个原输入剔除 44 条后为 2,637 个有效地址。运行状态必须读实际 batch receipt、结果和账本，不凭启动状态宣称完成。
+- 每日 02:00 原采集入口已接 `qrent-school-enrichment.service`：`ops/prepare_school_enrichment.py` 只按当前采集真实 school_cohorts 准备去重输入，`ops/enrichment_queue.py --nsw-free` 仅允许免费 NSW 补缺，再做受控模型和完整记录发布。服务先等待首次补充的 `enrichment/bootstrap-first-pass.json`；当前格式的首次整条每日运行还未验收。不要用历史兼容测试副本冒充新全量。
+- 10 月 30 日 15:05 免费队列结束后有缓存发布后置服务，必须先确认 `batch-b/result.json` 为 commute_complete，再发布首次队列 held checkpoint；不新增模型/地图请求。模型/每日队列在当天 14:30–16:00 让出正式账本，不能挤掉免费任务。
 
 ## 可核查记录
 
@@ -40,4 +44,5 @@
 - [免费额度、便宜 API 与采购候选](docs/reports/2026-10-29-commute-api-options.md)
 - [当前执行计划及被替代的历史提案](docs/superpowers/plans/2026-10-28-website-sync.md)
 - [原区域规则、库存筛选与 NSW 验证](docs/reports/2026-10-29-school-scope-and-nsw.md)
+- [模型独立预算、分批发布与每日连接](docs/reports/2026-10-29-model-budget-and-publication.md)
 - 私有输出中的 `deployments/*/server-receipt.json`、`enrichment-server-stage-20261029` 和 `enrichment-validation-20261029`。不要将私有备份、账本、页面原文或 `.env` 推送。
