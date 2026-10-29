@@ -281,7 +281,21 @@ class ScoringService:
                         f'保留这些评分，不重新输出已有组，只补充{missing}组。',
                         cache_slot=f'score-fill-v1-{slot}-{missing}')
                     additional=self._parse_scores(correction) if correction else []
-                    if len(additional)==missing:scores.extend(additional)
+                    if 0<len(additional)<=missing:scores.extend(additional)
+                    # Some Flash responses still contain one group when asked
+                    # for several. Keep every valid group already received and
+                    # request only one missing group per separately cached slot.
+                    for position in range(len(scores),self.config.scores_per_call):
+                        single_system=SCORING_SYSTEM_PROMPT.split('请一次性给出4组',1)[0]+(
+                            '只输出1组独立评分，只能有1行，不输出其他文字。\n'
+                            '每行格式：房屋质量:X, 居住体验:Y, 房屋内配套:Z, 总评分:W')
+                        single=self._call_model(single_system,
+                            f'房源描述：{description}\n已有{len(scores)}组总评分：{scores}。'
+                            '只补充一组独立评分，不重复已有组。',
+                            cache_slot=f'score-single-fill-v2-{slot}-{position}')
+                        one=self._parse_scores(single) if single else []
+                        if len(one)!=1:break
+                        scores.extend(one)
                 if len(scores) == self.config.scores_per_call:
                     all_scores.extend(scores)
             time.sleep(1)  # 避免 rate limit

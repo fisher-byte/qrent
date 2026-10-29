@@ -103,15 +103,15 @@ class ModelResumeTests(unittest.TestCase):
         self.assertIn('3组',wires[1]['messages'][0]['content'])
         self.assertIn('不重新输出',wires[1]['messages'][1]['content'])
 
-    def test_wrong_number_of_fill_groups_stays_incomplete_without_repeating_the_paid_response(self):
+    def test_an_overfull_single_group_repair_stays_incomplete_without_repeating_paid_responses(self):
         def response(count):
             value=MagicMock(status_code=200,usage={})
             value.output.choices=[{'message':{'content':'\n'.join(['总评分:14']*count)}}]
             return value
-        with patch('src.services.scoring.dashscope.Generation.call',side_effect=[response(1),response(2),response(4)]) as call,patch('src.services.scoring.time.sleep'):
+        with patch('src.services.scoring.dashscope.Generation.call',side_effect=[response(1),response(2),response(4),response(4)]) as call,patch('src.services.scoring.time.sleep'):
             self.assertEqual(self.service(10).score_property('Partial response with wrong fill count.'),(None,[]))
             self.assertEqual(self.service(10).score_property('Partial response with wrong fill count.'),(None,[]))
-        self.assertEqual(call.call_count,3)
+        self.assertEqual(self.state.db.execute('SELECT COUNT(*) FROM calls').fetchone()[0],4)
 
     def test_chinese_fallback_translates_existing_english_keywords_and_preserves_scores(self):
         from src.models import PropertyData,PropertySource
