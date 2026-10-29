@@ -77,10 +77,13 @@ class ScoringService:
     使用 DashScope API 进行评分和关键词提取
     """
     
-    def __init__(self, config: Optional[ScoringConfig] = None, *, call_guard=None, call_observer=None):
+    def __init__(self, config: Optional[ScoringConfig] = None, *, call_guard=None, call_observer=None,
+                 response_cache=None):
         self.config = config or settings.scoring
         self.call_guard = call_guard
         self.call_observer = call_observer
+        self.response_cache=response_cache
+        self.cache_hits=0
         api_key = (
             self.config.api_key
             or getattr(settings, "env_property_rating_api_key", None)
@@ -93,12 +96,28 @@ class ScoringService:
         self, 
         system_prompt: str, 
         user_prompt: str,
-        max_retries: int = 3
+        max_retries: int = 3,
+        *, cache_slot=None
     ) -> Optional[str]:
         """调用模型 API"""
+        cache_key=attempt_key=None
+        if self.response_cache is not None:
+            cache_key=self.response_cache.key('model-response-v1',self.config.model_name,
+                system_prompt,user_prompt,self.config.temperature,self.config.max_tokens,.9,False,cache_slot)
+            cached=self.response_cache.get(cache_key)
+            if cached:
+                self.cache_hits+=1
+                return cached['text']
+            attempt_key=self.response_cache.key('model-request-review-v1',cache_key)
+            if self.response_cache.get(attempt_key):
+                raise APILimitReached('Previous model request requires review; automatic repeat refused')
+            max_retries=1  # Uncertain formal requests must not be retried and billed twice.
         for attempt in range(max_retries):
             # Outside the retry handler: budget exhaustion must stop requests.
             request_id = self.call_guard(system_prompt, user_prompt, self.config.max_tokens) if self.call_guard else None
+            if self.response_cache is not None:
+                self.response_cache.put(attempt_key,{'request_id':request_id,'status':'reserved'})
+            observed=False
             try:
                 messages = [
                     {'role': 'system', 'content': system_prompt},
@@ -116,18 +135,29 @@ class ScoringService:
                 )
                 if self.call_observer:
                     self.call_observer(request_id, response.status_code, dict(response.usage or {}))
+                    observed=True
                 
                 if response.status_code == 200:
-                    return response.output.choices[0]['message']['content']
+                    content=response.output.choices[0]['message']['content']
+                    if not isinstance(content,str) or not content.strip():
+                        raise ValueError('Empty model response')
+                    if self.response_cache is not None:
+                        self.response_cache.put(cache_key,{'text':content,'request_id':request_id})
+                        self.response_cache.put(attempt_key,{'request_id':request_id,'status':'OK'})
+                    return content
                 else:
-                    logger.error(f"API 错误: {response.code} - {response.message}")
+                    logger.error('Model API rejected request: %s',response.code)
+                    if self.response_cache is not None:
+                        self.response_cache.put(attempt_key,{'request_id':request_id,'status':'HTTP_'+str(response.status_code)})
                     
             except APILimitReached:
                 raise
             except Exception as e:
-                if self.call_observer:
+                if self.call_observer and not observed:
                     self.call_observer(request_id, type(e).__name__, {})
-                logger.error(f"第 {attempt + 1} 次调用失败: {e}")
+                logger.error('Model request failed: %s',type(e).__name__)
+                if self.response_cache is not None:
+                    self.response_cache.put(attempt_key,{'request_id':request_id,'status':type(e).__name__})
                 if attempt < max_retries - 1:
                     time.sleep(2 ** attempt)
         
@@ -172,8 +202,8 @@ class ScoringService:
         
         all_scores = []
         
-        for _ in range(self.config.num_calls):
-            response = self._call_model(SCORING_SYSTEM_PROMPT, user_prompt)
+        for slot in range(self.config.num_calls):
+            response = self._call_model(SCORING_SYSTEM_PROMPT, user_prompt,cache_slot='score-'+str(slot))
             if response:
                 scores = self._parse_scores(response)
                 if len(scores) == self.config.scores_per_call:

@@ -31,33 +31,33 @@ AI_FIELDS = ('average_score', 'scores', 'keywords', 'description_cn')
 ENRICHED_ERRORS = {'description_cn', 'keywords', 'complete_ai_scores', 'commute_time'}
 
 
-def model_cost(model, input_tokens, output_tokens):
-    # Verified Beijing non-thinking list prices; reserve at USD 0.20/CNY as
-    # a conservative conversion ceiling, not a quoted exchange rate.
+def model_cost_cny(model, input_tokens, output_tokens):
+    # Verified Beijing non-thinking list prices. Model budget is native CNY.
     rates = {'qwen-plus': (.8, 2), 'qwen-flash': (.15, 1.5)}
     if model not in rates or input_tokens > 128000:
         raise APILimitReached('Model pricing requires review before API use')
     input_rate, output_rate = rates[model]
-    return (input_tokens * input_rate + output_tokens * output_rate) / 1000000 * .20
+    return (input_tokens * input_rate + output_tokens * output_rate) / 1000000
 
 
 def enrich(properties, state, *, use_api=False, max_model_calls=16, max_maps_calls=14,
-           school_targets=None, commute_only=False, progress=None):
+           school_targets=None, commute_only=False, score_only=False, progress=None):
     config = ScoringConfig()
     def guard(system_prompt, user_prompt, output_tokens):
         input_bound = len((system_prompt + user_prompt).encode()) + 1024
         return state.reserve('model', config.model_name, max_model_calls,
-                             usd_ceiling=model_cost(config.model_name, input_bound, output_tokens))
+                             cny_ceiling=model_cost_cny(config.model_name, input_bound, output_tokens))
 
     def observe(request_id, status, usage):
-        cost = model_cost(config.model_name, usage['input_tokens'], usage['output_tokens']) if status == 200 and usage else None
-        state.finish(request_id, status, usage, actual_usd=cost)
+        cost = model_cost_cny(config.model_name, usage['input_tokens'], usage['output_tokens']) if status == 200 and usage else None
+        state.finish(request_id, status, usage, actual_cny=cost)
 
-    scorer = ScoringService(config, call_guard=guard, call_observer=observe)
+    scorer = ScoringService(config, call_guard=guard, call_observer=observe,response_cache=state)
     maps = CommutePool(state, max_calls=max_maps_calls)
     ai_hits = 0
     records = []
     commute_required = commute_returned = blocked_inputs = 0
+    score_required=score_complete=0
     prompt_sha = hashlib.sha256((SCORING_SYSTEM_PROMPT + KEYWORDS_EN_SYSTEM_PROMPT + KEYWORDS_CN_SYSTEM_PROMPT).encode()).hexdigest()
     try:
         for prop in properties:
@@ -96,13 +96,16 @@ def enrich(properties, state, *, use_api=False, max_model_calls=16, max_maps_cal
                     # Resume completed stages if a later stage reaches its cap.
                     state.put(key, {name: getattr(prop, name) for name in AI_FIELDS})
             for school in schools:
-                if use_api and can_enrich:
+                if use_api and can_enrich and not score_only:
                     minutes = maps.calculate(prop, school)
                     prop.commute_times.pop(school, None)
                     if minutes is not None:
                         prop.commute_times[school] = minutes
             checks = {school: publication_errors(prop, school) for school in schools}
             if can_enrich:
+                score_required+=1
+                score_complete+=int(len(prop.scores or [])==8 and prop.average_score is not None and
+                                    bool(prop.keywords) and bool(prop.description_cn))
                 commute_required += len(schools)
                 commute_returned += sum(type(prop.commute_times.get(s)) is int and 0 < prop.commute_times[s] <= 1440 for s in schools)
             else:
@@ -114,10 +117,14 @@ def enrich(properties, state, *, use_api=False, max_model_calls=16, max_maps_cal
                 progress({'processed_addresses':len(records),'selected_addresses':len(properties),
                           'commute_required_pairs_so_far':commute_required,
                           'commute_returned_pairs':commute_returned,'blocked_input_records':blocked_inputs,
-                          'maps_cache_hits':maps.cache_hits})
+                          'maps_cache_hits':maps.cache_hits,'score_required_records':score_required,
+                          'score_complete_records':score_complete,'model_call_cache_hits':scorer.cache_hits})
         return {'records': records, 'ai_cache_hits': ai_hits, 'maps_cache_hits': maps.cache_hits,
                 'maps_pool_entries': len(maps.keys), 'maps_errors': maps.errors, 'api_usage': state.summary(),
                 'monthly_budget': state.budget_summary(), 'commute_required_pairs':commute_required,
+                'model_budget':state.model_budget_summary(),
+                'score_required_records':score_required,'score_complete_records':score_complete,
+                'model_call_cache_hits':scorer.cache_hits,
                 'commute_returned_pairs':commute_returned,'blocked_input_records':blocked_inputs}
     finally:
         maps.close()
@@ -136,6 +143,7 @@ def main():
     parser.add_argument('--deduplicate', action='store_true', help='Group source IDs by full address; hold conflicts for review')
     parser.add_argument('--cohorts', type=Path, help='Capture result containing original query-to-school provenance')
     parser.add_argument('--commute-only',action='store_true',help='Never call models or publish; report transit completion separately')
+    parser.add_argument('--score-only',action='store_true',help='Only complete model fields; never request routes or publish')
     parser.add_argument('--mysql-env', type=Path, default=Path(__file__).resolve().parents[2] / '.env')
     args = parser.parse_args()
     if args.limit <= 0 or min(args.max_model_calls, args.max_maps_calls) < 0:
@@ -144,6 +152,8 @@ def main():
         parser.error('--publish requires --enrich and complete cached/live results')
     if args.commute_only and (args.publish or not args.enrich):
         parser.error('--commute-only requires --enrich and cannot publish')
+    if args.score_only and (args.publish or args.commute_only or not args.enrich):
+        parser.error('--score-only requires --enrich and cannot publish or combine with --commute-only')
     args.output.mkdir(parents=True, exist_ok=True)
     run = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
     state = EnrichmentState(args.state, run)
@@ -165,12 +175,12 @@ def main():
                 return
             last_progress[0]=time.monotonic()
             value.update(run=run,updated_at=datetime.now(timezone.utc).isoformat(),
-                         api_usage=state.summary(),monthly_budget=state.budget_summary())
+                         api_usage=state.summary(),monthly_budget=state.budget_summary(),model_budget=state.model_budget_summary())
             path=args.output/'progress.json';temp=path.with_suffix('.tmp')
             temp.write_text(json.dumps(value,ensure_ascii=False,indent=2));temp.chmod(0o600);temp.replace(path)
         result = enrich(properties, state, use_api=args.enrich, max_model_calls=args.max_model_calls,
                         max_maps_calls=args.max_maps_calls, school_targets=targets,
-                        commute_only=args.commute_only,progress=progress)
+                        commute_only=args.commute_only,score_only=args.score_only,progress=progress)
         result.update(run=run, source_city_counts=dict(Counter(prop.source.value + '/' + prop.state for prop in properties)),
                       mysql_written=False, publication={}, production_schema_changed=False)
         ready = [(prop, [school for school in record['schools'] if not publication_errors(prop, school)])
@@ -202,12 +212,15 @@ def main():
         if args.commute_only:
             result['status']=('commute_complete' if result['commute_required_pairs']>0 and
                               result['commute_returned_pairs']==result['commute_required_pairs'] else 'commute_partial')
+        if args.score_only:
+            result['status']=('scores_complete' if result['score_required_records']>0 and
+                result['score_complete_records']==result['score_required_records'] else 'scores_partial')
         for filename, data in [('properties.json', [prop.to_dict() for prop in properties]), ('result.json', result)]:
             path = args.output / filename
             path.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str))
             path.chmod(0o600)
         print(json.dumps({k: v for k, v in result.items() if k != 'records'}, ensure_ascii=False, default=str))
-        return 0 if result['status'] in {'published', 'ready','commute_complete'} else 2
+        return 0 if result['status'] in {'published', 'ready','commute_complete','scores_complete'} else 2
     finally:
         state.close()
 

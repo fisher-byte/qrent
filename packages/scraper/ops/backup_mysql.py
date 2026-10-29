@@ -37,7 +37,11 @@ def decode(value):
 
 
 def config_from_env(path):
-    env = {**dotenv_values(path), **{k: v for k, v in os.environ.items() if k.startswith('DB_') or k == 'DATABASE_URL'}}
+    # An explicit --mysql-env must select its own restricted identity even when
+    # the scraper process inherited a different DB configuration. Empty values
+    # intentionally clear an inherited DATABASE_URL.
+    env = {**{k: v for k, v in os.environ.items() if k.startswith('DB_') or k == 'DATABASE_URL'},
+           **dotenv_values(path)}
     if env.get('DATABASE_URL'):
         url = urlsplit(env['DATABASE_URL'])
         if url.scheme != 'mysql':

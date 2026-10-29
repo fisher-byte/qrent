@@ -37,7 +37,7 @@ class EnrichmentCostTests(unittest.TestCase):
             self.state = EnrichmentState(Path(self.temp.name) / 'cache.db', 'four-dollar-cap')
         self.assertEqual(self.state.budget_summary()['ceiling_usd'], 4)
         self.state.record_expense('existing-paid-and-reserved', .65)
-        self.state.reserve('model', 'qwen-plus', 100, usd_ceiling=3.35)
+        self.state.reserve('maps', 'one', 100, usd_ceiling=3.35)
         with self.assertRaises(APILimitReached):
             self.state.reserve('maps', 'one', 100, usd_ceiling=.000001)
 
@@ -100,9 +100,9 @@ class EnrichmentCostTests(unittest.TestCase):
 
     def test_monthly_dollar_cap_is_checked_before_a_request_and_cannot_reset_on_restart(self):
         self.state.record_expense('proxy-purchase', 0.30)
-        self.state.reserve('model', 'qwen-plus', 100, usd_ceiling=3.70)
+        self.state.reserve('maps', 'one', 100, usd_ceiling=3.70)
         with self.assertRaises(APILimitReached):
-            self.state.reserve('model', 'qwen-plus', 100, usd_ceiling=.000001)
+            self.state.reserve('maps', 'one', 100, usd_ceiling=.000001)
         self.assertEqual(self.state.budget_summary()['remaining_usd'], 0)
         path = Path(self.temp.name) / 'cache.db'
         self.state.close()
@@ -117,7 +117,7 @@ class EnrichmentCostTests(unittest.TestCase):
         self.assertEqual(self.state.budget_summary()['spent_or_reserved_usd'], .30)
 
     def test_actual_cost_releases_only_the_unused_reservation(self):
-        request_id = self.state.reserve('model', 'qwen-plus', 100, usd_ceiling=.10)
+        request_id = self.state.reserve('maps', 'one', 100, usd_ceiling=.10)
         self.state.finish(request_id, 200, {'input_tokens': 100, 'output_tokens': 10}, actual_usd=.01)
         self.assertEqual(self.state.budget_summary()['spent_or_reserved_usd'], .01)
 
