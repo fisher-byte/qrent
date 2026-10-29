@@ -74,6 +74,25 @@ class SchoolScopeTests(unittest.TestCase):
         self.assertIn('price_conflict',group['review'])
         self.assertIn('multiple_ids_in_one_source',group['review'])
 
+    def test_daily_selection_preserves_an_already_published_source_identity_after_domain_details_arrive(self):
+        a=prop(description_en='Newly filled Domain description')
+        b=prop(source='realestate',ident='900',description_en='Previously published REA description')
+        targets={('domain','123'):['UTS'],('realestate','900'):['UNSW']}
+        result=select_inventory([a,b],targets,published_priority={('realestate','900'):71})
+        group=result['groups'][0]
+        self.assertEqual(group['primary'],b)
+        self.assertEqual(group['schools'],['UNSW','UTS'])
+        self.assertEqual(group['review'],[])
+        self.assertEqual(len(group['members']),2)
+
+    def test_a_published_identity_cannot_hide_a_current_price_conflict_or_select_an_absent_listing(self):
+        a=prop(description_en='Domain description')
+        b=prop(source='realestate',ident='900',description_en='REA description');b.price_per_week=700
+        result=select_inventory([a,b],published_priority={('realestate','900'):71,('domain','absent'):1})
+        self.assertIn('price_conflict',result['groups'][0]['review'])
+        result=select_inventory([a],published_priority={('realestate','900'):71})
+        self.assertEqual(result['groups'][0]['primary'],a)
+
     def test_hidden_or_street_only_addresses_are_not_physical_property_groups(self):
         result=select_inventory([prop(first='Address available on request'), prop(ident='2',first='Example Street'),
                                  prop(ident='3',first='1 bed/2-6 Willis Street'),prop(ident='4',first='2x/Loftus Street')])

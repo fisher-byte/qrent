@@ -41,7 +41,7 @@ def reuse_details(properties, references, max_age_days=7, allow_same_source=Fals
     now = datetime.now()
     for ref in references:
         key = address_key(ref)
-        if (key and ref.description_en and ref.thumbnail_url and ref.available_date
+        if (key and ref.description_en
                 and timedelta(0) <= now - ref.scraped_at <= timedelta(days=max_age_days)):
             candidates.setdefault(key, []).append(ref)
     reused = 0
@@ -54,6 +54,8 @@ def reuse_details(properties, references, max_age_days=7, allow_same_source=Fals
                     or ref.price_per_week != target.price_per_week
                     or ref.bedroom_count != target.bedroom_count):
                 continue
+            if not same_source and (not ref.thumbnail_url or not ref.available_date):
+                continue  # Keep cross-source reuse conservative; a same-ID description is already known.
             for name in ("description_en", "description_cn", "keywords", "average_score",
                          "thumbnail_url", "available_date"):
                 if not getattr(target, name):

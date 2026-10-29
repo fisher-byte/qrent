@@ -85,3 +85,48 @@ class ModelResumeTests(unittest.TestCase):
             self.assertEqual(service.extract_keywords_cn('A private terrace and a modern kitchen.'),'独立露台，现代厨房')
         self.assertEqual(call.call_count,2)
 
+    def test_only_missing_score_groups_are_filled_once_and_original_groups_survive_restart(self):
+        def response(scores):
+            value=MagicMock(status_code=200,usage={'input_tokens':100,'output_tokens':30})
+            value.output.choices=[{'message':{'content':'\n'.join('总评分:'+str(x) for x in scores)}}]
+            return value
+        wires=[]
+        replies=iter([response([14]),response([15,15,15]),response([16]*4)])
+        def send(**kwargs):wires.append(kwargs);return next(replies)
+        with patch('src.services.scoring.dashscope.Generation.call',side_effect=send),patch('src.services.scoring.time.sleep'):
+            average,scores=self.service(10).score_property('Original sunny apartment description.')
+            self.state.run_id='resumed-after-fill'
+            repeated=self.service(10).score_property('Original sunny apartment description.')
+        self.assertEqual(scores,[14,15,15,15,16,16,16,16])
+        self.assertEqual((average,scores),repeated)
+        self.assertEqual(len(wires),3)
+        self.assertIn('3组',wires[1]['messages'][0]['content'])
+        self.assertIn('不重新输出',wires[1]['messages'][1]['content'])
+
+    def test_wrong_number_of_fill_groups_stays_incomplete_without_repeating_the_paid_response(self):
+        def response(count):
+            value=MagicMock(status_code=200,usage={})
+            value.output.choices=[{'message':{'content':'\n'.join(['总评分:14']*count)}}]
+            return value
+        with patch('src.services.scoring.dashscope.Generation.call',side_effect=[response(1),response(2),response(4)]) as call,patch('src.services.scoring.time.sleep'):
+            self.assertEqual(self.service(10).score_property('Partial response with wrong fill count.'),(None,[]))
+            self.assertEqual(self.service(10).score_property('Partial response with wrong fill count.'),(None,[]))
+        self.assertEqual(call.call_count,3)
+
+    def test_chinese_fallback_translates_existing_english_keywords_and_preserves_scores(self):
+        from src.models import PropertyData,PropertySource
+        def response(text):
+            value=MagicMock(status_code=200,usage={'input_tokens':100,'output_tokens':20})
+            value.output.choices=[{'message':{'content':text}}]
+            return value
+        prop=PropertyData(source=PropertySource.DOMAIN,house_id='123',description_en='A sunny apartment with a balcony.',
+            average_score=14,scores=[14]*8,keywords='sunny balcony, built-in wardrobe')
+        with patch('src.services.scoring.dashscope.Generation.call',side_effect=[
+                response('sunny balcony, built-in wardrobe'),response('sunny balcony'),response('阳光阳台，内置衣柜')]) as call:
+            self.service(10).process_property(prop)
+            self.service(10).process_property(prop)
+        self.assertEqual((prop.average_score,prop.scores,prop.keywords),(14,[14]*8,'sunny balcony, built-in wardrobe'))
+        self.assertEqual(prop.description_cn,'阳光阳台，内置衣柜')
+        self.assertEqual(call.call_count,3)
+        self.assertIn('sunny balcony, built-in wardrobe',call.call_args.kwargs['messages'][1]['content'])
+

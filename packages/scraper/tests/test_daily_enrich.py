@@ -7,6 +7,7 @@ import unittest
 from datetime import datetime
 from unittest.mock import patch
 import subprocess
+from unittest.mock import MagicMock
 
 from ops.enrichment_queue import cohort_subset,save_frozen
 from src.services.enrichment_state import EnrichmentState
@@ -79,6 +80,81 @@ class DailyEnrichmentTests(unittest.TestCase):
             self.assertFalse(result['models_enabled'])
             self.assertEqual((result['published_addresses'],result['held_addresses']),(1,1))
             self.assertTrue((root/'output/school-enrichment-test-day/model-paused.json').is_file())
+
+    def test_daily_waits_for_actual_first_pass_before_freezing_current_published_identities(self):
+        daily=self.module('ops.daily_enrich')
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);release=root/'releases/recovery-20261027';release.mkdir(parents=True)
+            save_frozen(root/'output/school-daily-20261030/run_result.json',{'run':'test-day','status':'success'})
+            events=[]
+            def wait(seconds):
+                events.append('wait')
+                save_frozen(root/'enrichment/bootstrap-first-pass.json',{'status':'processed'})
+            def run(command,**kwargs):
+                events.append('prepare' if 'prepare_school_enrichment.py' in command[1] else 'queue')
+                if events[-1]=='queue':
+                    save_frozen(root/'output/school-enrichment-test-day/queue/result.json',
+                        {'addresses':2,'published_addresses':2,'held_addresses':0})
+                return subprocess.CompletedProcess(command,0)
+            with patch('ops.daily_enrich.time.sleep',side_effect=wait),patch('ops.daily_enrich.subprocess.run',side_effect=run),patch('ops.daily_enrich.model_authorized',return_value=False):
+                daily.run_daily(root,datetime(2026,10,30))
+            self.assertEqual(events,['wait','prepare','queue'])
+
+    def test_published_priority_reads_only_property_identities_in_a_read_only_transaction(self):
+        prepare=self.module('ops.prepare_school_enrichment')
+        self.assertTrue(callable(getattr(prepare,'published_source_priority',None)))
+        with tempfile.TemporaryDirectory() as temp:
+            env=Path(temp)/'writer.env';env.write_text('DATABASE_URL=\nDB_HOST=fixture\nDB_USER=readonly\nDB_PASSWORD=offline\n')
+            connection=MagicMock();cursor=connection.cursor.return_value
+            cursor.fetchall.return_value=[(71,900,'https://www.realestate.com.au/property-900'),
+                (18,123,'https://www.domain.com.au/example-123'),(19,124,'https://unrelated.example/124')]
+            with patch('ops.prepare_school_enrichment.mysql.connector.connect',return_value=connection):
+                result=prepare.published_source_priority(env)
+            self.assertEqual(result,{('realestate','900'):71,('domain','123'):18})
+            connection.start_transaction.assert_called_once_with(readonly=True,consistent_snapshot=True)
+            self.assertEqual(cursor.execute.call_args.args,('SELECT id,house_id,url FROM properties',))
+            connection.commit.assert_not_called();connection.rollback.assert_called_once();connection.close.assert_called_once()
+
+    def test_restart_after_partial_publication_keeps_the_original_frozen_selection_and_receipts(self):
+        from src.models import PropertyData,PropertySource
+        from src.services.sqlite_store import SQLiteStore
+        prepare=self.module('ops.prepare_school_enrichment')
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);release=root/'release';source=release/'ops/prepare_school_enrichment.py'
+            source.parent.mkdir(parents=True);source.write_text('frozen fixture release')
+            save_frozen(release/'DEPLOYMENT.json',{'files_sha256':{'ops/prepare_school_enrichment.py':hashlib.sha256(source.read_bytes()).hexdigest()}})
+            props=[]
+            for index in range(51):
+                identity='123' if index==0 else str(199+index)
+                props.append(PropertyData(source=PropertySource.DOMAIN,house_id=identity,state='NSW',postcode='2042',
+                    address_line1=str(index+2)+'/18 Example Street',address_line2='newtown-nsw-2042',
+                    bedroom_count=2,bathroom_count=1,property_type=2,price_per_week=600,price_text='$600 per week',
+                    description_en='A sunny apartment with a balcony.',url='https://www.domain.com.au/example-'+identity,
+                    thumbnail_url='https://cdn.example/house.jpg'))
+            other=PropertyData.from_dict(props[0].to_dict());other.source=PropertySource.REALESTATE;other.house_id='900';other.url='https://www.realestate.com.au/property-900'
+            props.append(other)
+            store=SQLiteStore(root/'properties.db');store.save(props);store.close()
+            identities=[[p.source.value,p.house_id] for p in props]
+            capture=root/'capture/run_result.json'
+            save_frozen(capture,{'run':'test','status':'success','school_scope':True,'requested_cities':['sydney'],
+                'captured_source_ids':identities,'school_cohorts':{'UNSW':{'domain':[p.house_id for p in props if p.source==PropertySource.DOMAIN],'realestate':['900']}}})
+            output=root/'out';env=root/'writer.env'
+            priority=MagicMock(return_value={})
+            with patch.object(prepare,'__file__',str(source)),patch.object(prepare,'published_source_priority',priority):
+                first=prepare.prepare(root/'properties.db',capture,output,env)
+                records=json.loads((output/'input.json').read_text())
+                save_frozen(output/'queue/batch-0001/receipt.json',{'status':'processed',
+                    'published_ids':[[p['source'],p['house_id']] for p in records[:50]],'held_ids':[]})
+                before={p:p.read_bytes() for p in output.rglob('*.json')}
+                priority.return_value={(p['source'],p['house_id']):71+i for i,p in enumerate(records[:50])}
+                resumed=prepare.prepare(root/'properties.db',capture,output,env)
+                self.assertEqual(priority.call_count,1)
+                self.assertEqual(resumed['eligible_addresses'],first['eligible_addresses'])
+                self.assertTrue(resumed['resumed_frozen'])
+                for p,value in before.items():self.assertEqual(p.read_bytes(),value,str(p))
+                with (output/'input.json').open('a') as target:target.write(' ')
+                with self.assertRaises(ValueError):prepare.prepare(root/'properties.db',capture,output,env)
+                self.assertEqual(priority.call_count,1)
 
 
 class EnrichmentStateContext:

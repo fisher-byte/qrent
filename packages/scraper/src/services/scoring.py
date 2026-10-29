@@ -271,6 +271,17 @@ class ScoringService:
             response = self._call_model(SCORING_SYSTEM_PROMPT, user_prompt,cache_slot='score-'+str(slot))
             if response:
                 scores = self._parse_scores(response)
+                if self.response_cache is not None and 0<len(scores)<self.config.scores_per_call:
+                    missing=self.config.scores_per_call-len(scores)
+                    system=SCORING_SYSTEM_PROMPT.split('请一次性给出4组',1)[0]+(
+                        f'请只补充{missing}组独立评分，每组一行，不输出其他文字。\n'
+                        '每行格式：房屋质量:X, 居住体验:Y, 房屋内配套:Z, 总评分:W')
+                    correction=self._call_model(system,
+                        f'房源描述：{description}\n已有{len(scores)}组总评分：{scores}。'
+                        f'保留这些评分，不重新输出已有组，只补充{missing}组。',
+                        cache_slot=f'score-fill-v1-{slot}-{missing}')
+                    additional=self._parse_scores(correction) if correction else []
+                    if len(additional)==missing:scores.extend(additional)
                 if len(scores) == self.config.scores_per_call:
                     all_scores.extend(scores)
             time.sleep(1)  # 避免 rate limit
@@ -296,7 +307,7 @@ class ScoringService:
         
         return ""
     
-    def extract_keywords_cn(self, description: str) -> str:
+    def extract_keywords_cn(self, description: str, english_keywords: Optional[str] = None) -> str:
         """提取中文关键词"""
         if not description or not description.strip():
             return ""
@@ -310,6 +321,11 @@ class ScoringService:
                 '请将 balcony、dishwasher、park views 等普通英文词翻译为中文。'
                 '从原文提取最多11个关键词，不添加原文没有的设施，只输出中文关键词列表。',
                 description,cache_slot='keywords-cn-repair-v2')
+        if response and not chinese_keywords_valid(response) and english_keywords and self.response_cache is not None:
+            response=self._call_model('你是简体中文翻译员。必须将每个普通英文描述翻译为简体中文，'
+                '仅品牌与专有地名可保留英文。只输出翻译后的关键词，不提取或添加新信息。',
+                '请将以下已验证的英文关键词逐项翻译为简体中文，只输出逗号分隔的中文关键词：\n'+english_keywords,
+                cache_slot='keywords-cn-translation-v1')
         if response and not chinese_keywords_valid(response):
             return ''
         if response:
@@ -344,7 +360,7 @@ class ScoringService:
         
         # 中文关键词/描述
         if force_update or not prop.description_cn:
-            prop.description_cn = self.extract_keywords_cn(description)
+            prop.description_cn = self.extract_keywords_cn(description,prop.keywords)
         
         return prop
     

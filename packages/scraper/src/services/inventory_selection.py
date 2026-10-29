@@ -20,7 +20,7 @@ def address_key(prop):
     return address, suburb_key(region.name), region.state, str(region.postcode)
 
 
-def select_inventory(properties, school_targets=None):
+def select_inventory(properties, school_targets=None, *, published_priority=None):
     # Repeated observations of the same source ID are not new properties.
     identities = {(prop.source.value, str(prop.house_id)): prop for prop in properties}
     def schools(prop):
@@ -43,9 +43,12 @@ def select_inventory(properties, school_targets=None):
             reasons.append('feature_conflict')
         if len(prices) > 1:
             reasons.append('price_conflict')
-        # Prefer a complete description, then Domain; never copy a rating from
-        # one different description into another model input.
-        primary = min(members, key=lambda p: (not bool(p.description_en), p.source.value != 'domain', str(p.house_id)))
+        # Preserve a complete published identity before the ordinary Domain
+        # preference, so filling the other source does not create another row
+        # for an address that already owns a website ID and favorites.
+        primary = min(members, key=lambda p: (not bool(p.description_en),
+            (published_priority or {}).get((p.source.value,str(p.house_id)),float('inf')),
+            p.source.value != 'domain', str(p.house_id)))
         target_schools = sorted({school for member in members for school in schools(member)})
         groups.append({'key': address, 'primary': primary, 'members': members,
                        'schools': target_schools, 'review': reasons})

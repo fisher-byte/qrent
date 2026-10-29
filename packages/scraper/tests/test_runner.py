@@ -151,6 +151,26 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual((result["status"], result["listings"], result["reused"]), ("success", 2, 1))
             self.assertEqual(result["detail_requests"], 0)
 
+    def test_known_same_source_description_is_not_downloaded_again_for_an_unknown_availability(self):
+        from recovery_runner import build_parser,capture
+        class KnownDomain:
+            browser=None
+            def __init__(self,**kwargs):pass
+            def scrape_area(self,area):return [listing(thumbnail_url='https://cdn.example/house.jpg')]
+            def scrape_property_details(self,properties,**kwargs):
+                raise AssertionError('Unknown availability must not repeat a successful description download')
+        with tempfile.TemporaryDirectory() as temp:
+            db=Path(temp)/'properties.db';store=SQLiteStore(db)
+            store.save([listing(description_en='A verified sunny apartment.',thumbnail_url='https://cdn.example/house.jpg')]);store.close()
+            args=build_parser().parse_args(['--areas','melbourne-vic-3000','--scrapers','domain',
+                '--db',str(db),'--output',temp,'--retries','0'])
+            result=capture(args,factories={'domain':KnownDomain})
+            self.assertEqual(result['status'],'success')
+            self.assertEqual((result['detail_requests'],result['reused']),(0,1))
+            store=SQLiteStore(db)
+            self.assertIsNone(store.recent()[0].available_date)
+            store.close()
+
 
 if __name__ == "__main__":
     unittest.main()

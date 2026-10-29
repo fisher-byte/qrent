@@ -43,12 +43,12 @@ def run_daily(root,now=None):
     capture_path=reports[-1];capture=json.loads(capture_path.read_text())
     output=root/'output'/('school-enrichment-'+capture['run'])
     environment=dict(os.environ,SCRAPER_ENV_FILE=str(release/'.env'))
+    while not (root/'enrichment/bootstrap-first-pass.json').exists():
+        time.sleep(30)  # Freeze published identity preferences after the first pass ends.
     command=[str(release/'.venv/bin/python'),str(release/'ops/prepare_school_enrichment.py'),
         '--db',str(root/'properties.db'),'--capture-result',str(capture_path),'--output',str(output),
         '--mysql-env',str(root/'enrichment/qrent-writer.env')]
     subprocess.run(command,cwd=release,env=environment,check=True)
-    while not (root/'enrichment/bootstrap-first-pass.json').exists():
-        time.sleep(30)  # No ledger lock and no API request while the first pass finishes.
     model_enabled=model_authorized(root,release)
     bonus_enabled=(root/'enrichment/distance-bonus-validated.json').is_file()
     command=[str(release/'.venv/bin/python'),str(release/'ops/enrichment_queue.py'),
