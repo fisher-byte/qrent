@@ -25,6 +25,10 @@ class ModelRequestUncertain(RuntimeError):
     pass
 
 
+class ModelProviderUnavailable(APILimitReached):
+    """A rejected or uncertain paid request requires review before any new call."""
+
+
 class SingleAttemptModelSession(requests.Session):
     """Prevent SDK connection retries or redirects from resending a paid POST."""
     def __init__(self):
@@ -114,6 +118,12 @@ class ScoringService:
         )
         if api_key:
             dashscope.api_key = api_key
+        self.provider_hold_key = (self.response_cache.key('model-provider-hold-v1',api_key or '')
+                                  if self.response_cache is not None else None)
+
+    def _hold_provider(self, request_id, reason):
+        self.response_cache.put(self.provider_hold_key,{'request_id':request_id,'reason':reason})
+        raise ModelProviderUnavailable('Model provider stopped: '+reason+'; manual review required')
     
     def _call_model(
         self, 
@@ -131,9 +141,12 @@ class ScoringService:
             if cached:
                 self.cache_hits+=1
                 return cached['text']
+            held=self.response_cache.get(self.provider_hold_key)
+            if held:
+                raise ModelProviderUnavailable('Model provider is held for review; new calls refused')
             attempt_key=self.response_cache.key('model-request-review-v1',cache_key)
             if self.response_cache.get(attempt_key):
-                raise APILimitReached('Previous model request requires review; automatic repeat refused')
+                raise ModelProviderUnavailable('Previous model request requires review; automatic repeat refused')
             max_retries=1  # Uncertain formal requests must not be retried and billed twice.
         for attempt in range(max_retries):
             # Outside the retry handler: budget exhaustion must stop requests.
@@ -175,6 +188,8 @@ class ScoringService:
                     logger.error('Model API rejected request: %s',response.code)
                     if self.response_cache is not None:
                         self.response_cache.put(attempt_key,{'request_id':request_id,'status':'HTTP_'+str(response.status_code)})
+                        code=re.sub(r'[^A-Za-z0-9_.-]','',str(response.code))[:64]
+                        self._hold_provider(request_id,'HTTP_'+str(response.status_code)+'_'+code)
                     
             except APILimitReached:
                 raise
@@ -184,6 +199,7 @@ class ScoringService:
                 logger.error('Model request failed: %s',type(e).__name__)
                 if self.response_cache is not None:
                     self.response_cache.put(attempt_key,{'request_id':request_id,'status':type(e).__name__})
+                    self._hold_provider(request_id,type(e).__name__)
                 if attempt < max_retries - 1:
                     time.sleep(2 ** attempt)
         

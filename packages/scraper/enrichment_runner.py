@@ -22,7 +22,8 @@ from src.services.publication import publication_errors, ai_field_errors
 from src.services.school_scope import schools_for_property, targets_from_capture
 from src.services.inventory_selection import select_inventory
 from src.services.scoring import (ScoringService, SCORING_SYSTEM_PROMPT,
-                                  KEYWORDS_EN_SYSTEM_PROMPT, KEYWORDS_CN_SYSTEM_PROMPT)
+                                  KEYWORDS_EN_SYSTEM_PROMPT, KEYWORDS_CN_SYSTEM_PROMPT,
+                                  ModelProviderUnavailable)
 
 
 SCHOOLS = {'NSW': ['UNSW', 'USYD', 'UTS'],
@@ -58,6 +59,7 @@ def enrich(properties, state, *, use_api=False, max_model_calls=16, max_maps_cal
     records = []
     commute_required = commute_returned = blocked_inputs = 0
     score_required=score_complete=0
+    model_provider_error=None
     prompt_sha = hashlib.sha256((SCORING_SYSTEM_PROMPT + KEYWORDS_EN_SYSTEM_PROMPT + KEYWORDS_CN_SYSTEM_PROMPT).encode()).hexdigest()
     try:
         for prop in properties:
@@ -87,20 +89,23 @@ def enrich(properties, state, *, use_api=False, max_model_calls=16, max_maps_cal
             if cached and complete_ai:
                 ai_hits += 1
                 state.put(key, cached)  # Upgrade earlier finite-TTL pilot entries.
-            elif use_api and can_enrich and config.api_key and not commute_only:
+            elif use_api and can_enrich and config.api_key and not commute_only and not model_provider_error:
                 invalid=ai_field_errors(prop)
                 if 'description_cn' in invalid:prop.description_cn=None
                 if 'keywords' in invalid:prop.keywords=None
                 if 'complete_ai_scores' in invalid:prop.average_score=None;prop.scores=[]
                 try:
                     scorer.process_property(prop, force_update=False)
+                except ModelProviderUnavailable as exc:
+                    model_provider_error=str(exc)
+                    errors.append(model_provider_error)
                 except APILimitReached as exc:
                     errors.append(str(exc))
                 finally:
                     # Resume completed stages if a later stage reaches its cap.
                     state.put(key, {name: getattr(prop, name) for name in AI_FIELDS})
             for school in schools:
-                if use_api and can_enrich and not score_only:
+                if use_api and can_enrich and not score_only and not model_provider_error:
                     minutes = maps.calculate(prop, school)
                     prop.commute_times.pop(school, None)
                     if minutes is not None:
@@ -128,6 +133,7 @@ def enrich(properties, state, *, use_api=False, max_model_calls=16, max_maps_cal
                 'model_budget':state.model_budget_summary(),
                 'score_required_records':score_required,'score_complete_records':score_complete,
                 'model_call_cache_hits':scorer.cache_hits,
+                'model_provider_error':model_provider_error,
                 'commute_returned_pairs':commute_returned,'blocked_input_records':blocked_inputs}
     finally:
         maps.close()
@@ -218,11 +224,15 @@ def main():
         if args.score_only:
             result['status']=('scores_complete' if result['score_required_records']>0 and
                 result['score_complete_records']==result['score_required_records'] else 'scores_partial')
+        if result['model_provider_error']:
+            result['status']='model_provider_unavailable'
         for filename, data in [('properties.json', [prop.to_dict() for prop in properties]), ('result.json', result)]:
             path = args.output / filename
             path.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str))
             path.chmod(0o600)
         print(json.dumps({k: v for k, v in result.items() if k != 'records'}, ensure_ascii=False, default=str))
+        if result['status']=='model_provider_unavailable':
+            return 3
         return 0 if result['status'] in {'published', 'ready','commute_complete','scores_complete'} else 2
     finally:
         state.close()
