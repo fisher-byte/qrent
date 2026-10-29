@@ -1,8 +1,18 @@
 # Qrent 通勤 API 免费量与采购候选
 
-核查时间：2026-10-29 凌晨至早晨（北京时间）。本次没有购买新的 API 服务。月度新增 API/代理支出上限仍为 USD 5；代理实验累计采购上限仍为 USD 1.50。两张供应商已付发票确认代理累计已买 **USD 0.60 / 2GB**，本月连同模型预留共 USD 0.65，月预算余量 USD 4.35。
+核查时间：2026-10-29 09:00 单次报告（北京时间，交付前只读复核）。本次没有购买新的 API 服务，没有新增模型或地图请求，也没有重启全量。月度新增 API/代理支出上限仍为 USD 5；代理实验累计采购上限仍为 USD 1.50。两张供应商已付发票确认代理累计已买 **USD 0.60 / 2GB**，本月连同模型预留共 USD 0.65，月预算余量 USD 4.35。
 
 先继续使用已经跑通的 Google 免费量。悉尼优先试 Transport for NSW 官方 Trip Planner；付费备选优先用 Distancematrix.ai 的免费样本验证澳洲公交，再决定是否开通。现有证据不能承诺只买几美元就能立即补齐两城全部房源、全部校区。
+
+## 09:00 交付复核
+
+- **预算：**09:12 以 SQLite `mode=ro` 读取服务器唯一正式账本，已花/预留仍为 USD 0.65，余量 USD 4.35。含实际代理采购 USD 0.60 和历史模型保守预留 USD 0.05；后者不是供应商实际账单。15 条成功通勤、1 条不确定请求、16 次模型调用及 19 条缓存均保留。Google 程序额度已占用 16/9,500 次，含不确定请求，不能等同为供应商已经结算 16 次。
+- **供应商与 Google：**代理总余量约 1.26GB，其中原计划 255.02MB、备用 1GB 未使用；备用计划尚未接入当前采集配置。Google 赠金页仍无额外赠金，预算页为 AUD 0/5、支出上限状态“不适用”，账单存在延迟。Google 的免费 SKU 与赠金是两回事。
+- **采集：**08:15 本次断点任务已经退出，`exit_code=1`、`complete_inventory=false`。保存 59,015 个来源 ID、3,198 页，四组分别为 Domain 悉尼 13,367 / 墨尔本 12,107，Real Estate 悉尼 17,465 / 墨尔本 16,076。墨尔本 Domain 根查询仍报 12,107/12,109；动态平台的这个差额不表示全市场绝对只缺 2 套。Domain 仍有 4,512 条缺描述、31 条未知价，不能直接批量发布。
+- **上线：**09:06 只读核对原 MySQL 仍为 3,115 房源、54 用户、7 校；四条完整样本的来源 URL、价格、评分、关键词、描述、图片及真实通勤通过公开 API 再核对。首页仍混有五月旧房源，普通学校选择仍只有悉尼 3 校。代码已部署且 179 项服务器检查通过，不等于全量采集、补充和网站同步全部完成。
+- **剩余工作：**保存断点后修复覆盖短缺，核定按原范围需要的地址—学校关联并扣除缓存，在免费额度内补充；配置受限写库身份并接入每日发布；取得原前端部署权限后上线已有的 7 校选项修复。本次仅交付报告，不为验证而启动收费队列。
+
+私有复核记录在 `packages/scraper/output/morning-report-20261029/`：`capture-result.json`、`process-status.json`、`ledger-readonly.json`、`mysql-api-readonly.json` 和浏览器观察摘要。原表及原记录保持策略不变。
 
 ## 已核实的 Google 账户与小样本
 
@@ -20,14 +30,16 @@ Compute Route Matrix Essentials 有单独免费 SKU，但矩阵按“起点数 �
 
 | 服务 | 免费量与当前价格 | 购买门槛 | 澳洲公交证据与当前判断 |
 | --- | --- | --- | --- |
-| Google Routes Essentials | 10,000 次/月；随后 USD 5/千次，过 10 万档 USD 4/千次 | 已有账号与有效结算，无新订阅 | **两城 14 条已真实跑通**；继续免费量，达到闸值暂停 |
+| Google Routes Essentials | 10,000 次/月；随后 USD 5/千次，过 10 万档 USD 4/千次 | 已有账号与有效结算，无新订阅 | **两城 14 条完整房源路线，加服务器普通出口 1 条已真实跑通**；继续免费量，达到闸值暂停 |
 | Transport for NSW Trip Planner | 默认 Bronze：60,000 调用/日、5/秒；开放数据路径，无本次采购 | 需注册、激活账号、创建应用 Key；尚未取得 Key | **NSW 官方公交规划**，含步行接驳；是悉尼优先候选，尚未在本账户实测 |
-| Distancematrix.ai Accurate | 免费 1,000 元素/月；Growth 前 10 万 USD 2/千，之后至 30 万 USD 1.60/千，30–50 万 USD 1.25/千，之后 USD 1/千 | 官网写明按量、无订阅/预付最低消费；升级 Growth 宣传 USD 50 赠金（约 25,000 元素），**尚非我方已获赠金** | 官方文档有 `mode=transit`，需指定时间与 `transit_mode`；**悉尼/墨尔本覆盖及准确度待免费对照试验** |
+| Distancematrix.ai Accurate | 免费 1,000 元素/月；Growth 前 10 万 USD 2/千，之后至 30 万 USD 1.60/千，30–50 万 USD 1.25/千，之后 USD 1/千 | Free 不需信用卡；官网写明 Growth 按量、无订阅/预付最低消费，实际支付步骤尚未验证；升级宣传 USD 50 赠金（约 25,000 元素），**尚非我方已获赠金** | 官方文档有 `mode=transit`；参数页对出发时间与 `transit_mode` 的必填描述不一致，**参数行为、悉尼/墨尔本覆盖及准确度待免费对照试验** |
 | TravelTime | Basic 免费供研发/评估，120 hits/min；生产价格询价 | 正式生产最低 12 个月，未公布美元价格 | 有公共交通与大矩阵；暂不作为 USD 5 生产方案 |
 | SearchAPI Google Maps Directions | 一次性 100 次试用；USD 40/月含 10,000，250/月含 100,000；百万档 USD 1,500/月 | 最低付费套餐 USD 40/月，超预算 | 文档有 transit、出发/到达时间；未在澳洲实测。批量单价虽低，套餐总额不适合目前 |
 | HERE Public Transit | 现行 Base Plan 价格需账号/询价核实 | 网上仍可见 Limited 1,000/日旧页面，但该套餐已退役 | 有公交接口和部分悉尼覆盖记录；**不把退役套餐当成可领取免费量** |
 
 对应官方来源：[NSW API 配额与申请](https://opendata.transport.nsw.gov.au/developers/api-basics)、[NSW Trip Planner](https://opendata.transport.nsw.gov.au/dataset/trip-planner-apis)；[Distancematrix.ai 价格及赠金](https://distancematrix.ai/pricing)、[公交参数](https://distancematrix.ai/distance-matrix-api)；[TravelTime 定价与年约](https://traveltime.com/pricing)；[SearchAPI 价格](https://www.searchapi.io/pricing)、[Directions 参数](https://www.searchapi.io/docs/google-maps-directions-api)；[HERE 套餐退役说明](https://knowledge.here.com/csm_kb?id=public_kb_csm_details&number=KB0028268)、[公交接口](https://docs.here.com/transit/reference/public-transit-api-v8-getroutes)。
+
+覆盖与保存权分别验收：Google 两城已实测，但标准路线内容缓存有限制；NSW 是官方开放数据，仍需按具体数据集许可核定保存与署名要求；Distancematrix.ai 尚未核实澳洲公交质量及长期保存权，不把其兼容参数当成实际覆盖证明。参数差异见其 [API 参考](https://doc.distancematrix.ai/)。
 
 ## 首次与日常的费用尺度
 
@@ -51,7 +63,7 @@ Compute Route Matrix Essentials 有单独免费 SKU，但矩阵按“起点数 �
 
 AI 也纳入同一 USD 5。四条原算法 qwen-plus 共 8,936 输入、1,281 输出 tokens，约 CNY 0.009711；完整描述与模型配置相同即复用。便宜模型和 Batch 仅列为下一步评估，不为已评分样本重新付费试模型，不假定它们质量相同或赠送额度可用。
 
-## 明早可执行的采购顺序
+## 采购与免费验证顺序
 
 1. **先不买 Google 额外额度**。现有 Key 已可用，先按原学校范围排队，持久化缓存成功结果；应用及 Cloud 配额阻止无界调用。
 2. 申请 NSW 官方 Trip Planner 应用 Key，先比对 20–50 条悉尼真实路线。地址识别请求也会消耗配额，校区坐标固定复用。
@@ -65,4 +77,4 @@ AI 也纳入同一 USD 5。四条原算法 qwen-plus 共 8,936 输入、1,281 �
 - GoMaps.pro 有旧的兼容 Directions 文档，但本次官网返回 502，未核实当前价格、可售状态和澳洲公交成功率，暂不列为购买推荐。
 - 维州官方开放平台提供免费数据和部分 API，不等于已找到可直接用的地址到地址旅程接口；自建 OpenTripPlanner/R5 还需测算内存、GTFS 与维护成本，今晚未部署。[维州平台变更](https://opendata.transport.vic.gov.au/news-and-updates/consolidating-access-to-transport-apis)
 
-过程证据与线上小样本见 [流水线恢复记录](2026-10-29-enrichment-recovery.md)。明早报告必须重新读取进程/账本/API，不能沿用凌晨数字声称全量已经同步。
+过程证据与线上小样本见 [流水线恢复记录](2026-10-29-enrichment-recovery.md)。09:00 报告已重新读取进程、账本、数据库、公开 API 和实际首页；本次没有采购或新增收费验证。
