@@ -5,10 +5,12 @@
 import re
 import time
 import logging
+from contextlib import nullcontext
 from typing import List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import dashscope
+import requests
 from tqdm import tqdm
 
 from ..models import PropertyData
@@ -16,6 +18,26 @@ from ..config import settings, ScoringConfig
 from .enrichment_state import APILimitReached
 
 logger = logging.getLogger(__name__)
+
+
+class ModelRequestUncertain(RuntimeError):
+    pass
+
+
+class SingleAttemptModelSession(requests.Session):
+    """Prevent SDK connection retries or redirects from resending a paid POST."""
+    def __init__(self):
+        super().__init__()
+        self.trust_env = False  # Qwen uses ordinary direct traffic, never a residential proxy.
+
+    def request(self, *args, **kwargs):
+        kwargs['allow_redirects'] = False
+        try:
+            return super().request(*args, **kwargs)
+        except requests.exceptions.ConnectionError:
+            # DashScope retries ConnectionError internally even when the caller
+            # disabled retries. Use a distinct error and keep its ledger hold.
+            raise ModelRequestUncertain('Model connection failed; manual review required') from None
 
 
 # 评分系统提示词
@@ -124,15 +146,18 @@ class ScoringService:
                     {'role': 'user', 'content': user_prompt}
                 ]
                 
-                response = dashscope.Generation.call(
-                    model=self.config.model_name,
-                    messages=messages,
-                    result_format='message',
-                    temperature=self.config.temperature,
-                    max_tokens=self.config.max_tokens,
-                    top_p=0.9,
-                    enable_thinking=False
-                )
+                formal = self.response_cache is not None
+                with SingleAttemptModelSession() if formal else nullcontext() as session:
+                    response = dashscope.Generation.call(
+                        model=self.config.model_name,
+                        messages=messages,
+                        result_format='message',
+                        temperature=self.config.temperature,
+                        max_tokens=self.config.max_tokens,
+                        top_p=0.9,
+                        enable_thinking=False,
+                        **({'session':session, 'timeout':90} if formal else {})
+                    )
                 if self.call_observer:
                     self.call_observer(request_id, response.status_code, dict(response.usage or {}))
                     observed=True

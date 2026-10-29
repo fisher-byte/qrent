@@ -1,6 +1,7 @@
 from pathlib import Path
 import tempfile
 import unittest
+import requests
 from unittest.mock import MagicMock,patch
 
 from src.config import ScoringConfig
@@ -38,5 +39,12 @@ class ModelResumeTests(unittest.TestCase):
             self.assertIsNone(self.service(10)._call_model('system','description'))
             with self.assertRaises(APILimitReached):self.service(10)._call_model('system','description')
         self.assertEqual(call.call_count,1)
+        self.assertEqual(self.state.db.execute('SELECT COUNT(*) FROM calls').fetchone()[0],1)
+
+    def test_sdk_transport_does_not_resend_an_uncertain_post(self):
+        with patch('requests.sessions.Session.send',
+                   side_effect=requests.exceptions.ConnectionError('connection dropped')) as send:
+            self.assertIsNone(self.service(10)._call_model('system','unique SDK transport test'))
+        self.assertEqual(send.call_count,1)
         self.assertEqual(self.state.db.execute('SELECT COUNT(*) FROM calls').fetchone()[0],1)
 
