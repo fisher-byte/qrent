@@ -294,7 +294,7 @@ class ScoringService:
                             '只补充一组独立评分，不重复已有组。',
                             cache_slot=f'score-single-fill-v2-{slot}-{position}')
                         one=self._parse_scores(single) if single else []
-                        if len(one)!=1:break
+                        if len(re.findall(r'总评分\s*[:：]',single or ''))!=1 or len(one)!=1:break
                         scores.extend(one)
                 if len(scores) == self.config.scores_per_call:
                     all_scores.extend(scores)

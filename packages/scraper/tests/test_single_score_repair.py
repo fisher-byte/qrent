@@ -76,5 +76,15 @@ class SingleScoreRepairTests(unittest.TestCase):
             self.assertEqual(self.scorer(4).score_property('Apartment with one unscored group.'),(None,[]))
         self.assertEqual(self.state.db.execute('SELECT COUNT(*) FROM calls').fetchone()[0],4)
 
+    def test_multiple_raw_groups_are_rejected_even_if_only_one_value_is_in_range(self):
+        for invalid in ('99','-2','NaN'):
+            with self.subTest(invalid=invalid):
+                description='Apartment with invalid extra score '+invalid
+                replies=['总评分:14','总评分:16\n总评分:12','总评分:18\n总评分:'+invalid,
+                         '总评分:16\n总评分:14\n总评分:12\n总评分:18']
+                with patch('requests.sessions.Session.send',autospec=True,side_effect=self.transport(replies)), \
+                        patch('src.services.scoring.time.sleep'):
+                    self.assertEqual(self.scorer(50).score_property(description),(None,[]))
+
 
 if __name__=='__main__':unittest.main()
