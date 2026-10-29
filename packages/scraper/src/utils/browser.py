@@ -179,6 +179,11 @@ class BrowserManager:
             
             if engine == 'camoufox':
                 from camoufox.sync_api import Camoufox
+                if proxy and os.getenv('CAMOUFOX_ASSET_PREFLIGHT','').lower()=='true':
+                    from camoufox import geolocation
+                    from .geoip_asset import ensure_geoip_asset
+                    asset=ensure_geoip_asset(geolocation,ip=self.geoip_address)
+                    logger.info('GeoIP asset preflight: %s',asset['status'])
                 camoufox_options = dict(
                     persistent_context=True, user_data_dir=profile_path,
                     headless=use_headless, proxy=proxy,
