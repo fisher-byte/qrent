@@ -92,3 +92,32 @@ NSW API 走既有普通香港出口，Domain 仍不使用住宅流量。Real Est
 本轮尚未写官网 MySQL，未补齐全批评分/关键词，也未声称整库同步。旧四条完整生产样本及原 3,111 条记录的验收见 [恢复报告](2026-10-29-enrichment-recovery.md)。
 
 墨尔本最新筛选为 2,597 对，原问题中的 2,615 对是门牌进一步校验前的估计。用户已选暂缓，因此不执行该队列，不发 Distancematrix.ai 请求或自动付费。
+
+## 15:14 最新验收与剩余任务
+
+14:25 已正式部署 **`20fd6f3`**，本机和正式服务器均为 **206 项检查通过**。回执 `output/deployments/20261029_142505_643139/server-receipt.json`，备份 `/root/qrent-scraper/backup/pre-source-20261029_142506_680820`。14:27 根 `run_scraper.sh` 已换为仅悉尼的学校入口，凌晨 02:00 cron 指向不变；文件 SHA256 `7d33728f694398f0605b9b55c2f4e6208531256555119223a1af1ed53c795354`。
+
+NSW 阶段后的 704 对缺口，先用已有 Google Routes 免费量补 **280 对，全部成功**；随后 3,829 对跨提供商通勤零请求复验全部命中。保留原失败记录，没有通过清账本重新申请额度。
+
+Google Cloud 的每日额度按太平洋时间午夜重置，因此在北京时间 **10 月 29 日 15:05** 的一次性服务器任务再补了 **280 对，全部成功**。15:13 只读读取正式缓存的结果为：
+
+| 当前悉尼冻结输入 | 数量 |
+| --- | ---: |
+| 有效地址 | 2,681 |
+| 必要地址—学校对 | 4,253 |
+| 成功通勤 | **4,109** |
+| 仍待补通勤 | **144** |
+| 仍有通勤缺口的地址 | 84 |
+| 本轮新增现金 | **USD 0** |
+
+正式账本保留 NSW 3,843 次 HTTP（包含不能精确解析的地址响应）、Google 575 成功和 1 历史不确定、模型 16 次；费用仍 USD 0.65 已花/预留、USD 3.35 余量。这里只统计缓存和真实请求，不把 HTTP 200 等同为地址/通勤成功。当前 read-only 探针新增 API 0、生产写入 0。
+
+剩余输入保存在服务器 `remaining-free-queue/`；下一次一次性任务为 **10 月 30 日 15:05 北京时间**。它复用上一批成功结果，只补未完成对，单批最多 280 次，始终模型 0、禁止发布。守卫脚本见 `packages/scraper/ops/guarded_free_batch.py`；实际投放脚本 SHA256 `8a13bc45694d857c2b714b8a428e8e6a7939ccf946fae39d722e9fb3377238dc`。它检查 69 个正式源文件、真实账本中的日/月请求、Routes 配置及上一批错误；源文件变化、前一批提供商异常或免费量不足时停止。10 月 29 日 15:00 前的检查正确得到 Google 已占 296 次、当前允许 0，不继续发请求。未来结果以 `batch-b/result.json` 为准。
+
+每日时区依据：[Cloud Quotas 的每日重置规则](https://docs.cloud.google.com/docs/quotas/overview)；免费月额度依据：[Google Maps 价格与免费量](https://developers.google.com/maps/billing-and-pricing/pricing)。未提高原 300/日和 9,500/月限额，未启用 Matrix、赠金或付费备用。
+
+正式账本已在 15:11 再做一致性备份、gzip 完整性及解压 SHA256 校验：`state-free-sydney-combined-20261029_151140.db.gz`，解压 18,870,272 bytes，SHA256 `63ab2e8ddd008b4ceccfb39c957fcbb37de2e79a9961b839c5ea5d6c217f50d7`。私有回执为 `final-ledger-backup.json`，不覆盖旧备份或失败记录。
+
+**官网没有因此批量发布。** 15:14 用原根 `.env` 对悉尼 MySQL 再做只读事务核对：房源 3,115、用户 54、学校代码 7，最新 `published_at` 仍是 2026-10-28 08:31:24；本轮生产写入 0。批量 AI 评分、中英文关键词和生产发布仍未完成；模型是否也必须完全免费，已向用户澄清，在收到回复前不新增付费模型请求。
+
+私有证据：`latest-cache-readonly.json`、`google-free-280/result.json`、`remaining-free-queue/{schedule-receipt,batch-a/result}.json`、本机 `mysql-readonly-final.json`。部署、采集窗口、路线缓存、模型字段、数据库和网页分别验收，不将这批真实通勤当成官网整库已经更新。

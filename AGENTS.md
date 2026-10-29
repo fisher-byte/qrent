@@ -30,6 +30,9 @@
 - 采集使用 `/root/qrent-scraper/.capture.lock`；用 `packages/scraper/ops/deploy_recovery.py` 加锁、备份、测试并部署。运行中不覆盖源码，不同时启动两个采集。
 - 旧都会区活动 `metro-full-integrity-20261028` 已部分结束，保留断点及原始记录，不再自动恢复整城任务。每日采集入口改用 `ops/run_school_capture.sh`；部署后核对根 `run_scraper.sh` 和 cron 的实际指向。旧 `exit-code` 文件可能属于前一次启动，进程以 `process-status.json` 与 launcher 的 PID/start ticks 一并判断。
 - NSW 通勤优先使用 Transport for NSW 免费 API，仅覆盖 NSW；所有端点共用账本每日 59,000 次和 0.30 秒间隔。`--commute-only` 禁止模型调用及生产发布；错误、不确定调用保留，成功同址学校通勤长期复用。墨尔本不会自动回退 Google 或 Distancematrix.ai。
+- 悉尼原区域修复 `20fd6f3` 已于 10 月 29 日 14:25 经 206 项服务器检查部署；根每日入口仅悉尼、每区 7 页、住宅流量最多 150MB，不自动充值。Sydney City 原配置保持，REA 查询规范化为邮编 2000；同邮编 URL 合并后为 Domain 22 / REA 19 个查询。
+- 本次悉尼剩余免费队列在 `/root/qrent-scraper/output/free-transit-batch-20261029/remaining-free-queue`。两次一次性服务器任务分别为 10 月 29、30 日北京时间 15:05，受 `ops/guarded_free_batch.py` 检查当前源文件、已有 Google 日/月占用和上一批结果，每批最多 280 新请求、模型 0、禁止发布，复用同一正式账本。前一批发生提供商错误时停止复跑；不把 timer active 或 exit 2 当作全部成功。读取实际 `batch-a/b/result.json` 与最新缓存探针确认进度。
+- 本轮新增模型调用仍为 0。用户的“模型也完全免费 / 可使用 USD 4 月总额内剩余预算”澄清未回复前，不为评分/关键词新增付费模型请求。
 
 ## 可核查记录
 
