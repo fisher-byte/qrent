@@ -39,7 +39,7 @@ def prepare(db,capture_path,output,mysql_env):
     job={'release':str(release),'state':'/root/qrent-scraper/enrichment/state.db',
          'input':str(input_path),'cohorts':str(cohorts),'output':str(output/'queue'),
          'mysql_env':str(mysql_env),'batch_size':50,'source_hashes':deployment['files_sha256'],
-         'pause_windows':[['2026-10-30T14:30:00+08:00','2026-10-30T16:00:00+08:00']]}
+         'pause_windows':[]}
     for name in ('input','cohorts'):job[name+'_sha256']=hashlib.sha256(Path(job[name]).read_bytes()).hexdigest()
     save_frozen(output/'job.json',job)
     receipt={'status':'prepared_no_api_calls','capture_run':capture['run'],
