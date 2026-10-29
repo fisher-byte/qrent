@@ -8,6 +8,8 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from src.services.enrichment_state import EnrichmentState
 from src.services.nsw_transit import NSWTransit, NSWTransitError, building_address, journey_minutes, compact_response
+from src.services.commute_pool import CommutePool
+from src.models import PropertyData, PropertySource
 
 
 class NSWTransitTests(unittest.TestCase):
@@ -28,6 +30,8 @@ class NSWTransitTests(unittest.TestCase):
               leg(5,'2026-10-30T09:05:00+11:00','2026-10-30T09:10:00+11:00')]
         self.assertEqual(journey_minutes({'journeys':[{'legs':legs}]}),40)
         legs[0]['transportation']['product']['class']=99
+        self.assertEqual(journey_minutes(compact_response('trip',{'journeys':[{'legs':legs}]})),40)
+        legs[1]['transportation']['product']={'class':2,'name':'Sydney Metro Network'}
         self.assertEqual(journey_minutes(compact_response('trip',{'journeys':[{'legs':legs}]})),40)
         legs[-1]['transportation']['product']['class']=101
         self.assertIsNone(journey_minutes({'journeys':[{'legs':legs}]}))
@@ -77,6 +81,28 @@ class NSWTransitTests(unittest.TestCase):
         self.assertEqual(building_address('2/18 George Street'),'18 George Street')
         self.assertEqual(building_address('Unit 2, 18 George Street'),'18 George Street')
         self.assertEqual(building_address('2-18 George Street'),'2-18 George Street')
+
+    def test_provider_street_abbreviations_and_number_case_do_not_change_the_address(self):
+        for expected,actual in [('Magdalene Terrace','Magdalene Tce'),
+                                ('Brittain Crescent','Brittain Cr'),('Watermans Quay','Watermans Qy')]:
+            with self.subTest(expected=expected):
+                self.http.get.return_value=MagicMock(status_code=200)
+                self.http.get.return_value.json.return_value={'locations':[{
+                    'isBest':True,'type':'singlehouse','coord':[-33.929812,151.153213],
+                    'buildingNumber':'11A','streetName':actual,'postCode':'2205'}]}
+                self.assertEqual(self.client.resolve('11a '+expected+', Wolli Creek NSW 2205',origin=True),
+                                 '151.153213:-33.929812:EPSG:4326')
+
+    def test_nsw_unresolved_pair_is_held_across_runs_for_review(self):
+        prop=PropertyData(source=PropertySource.DOMAIN,house_id='123',address_line1='1 Example Street',
+                          address_line2='newtown-nsw-2042',state='NSW')
+        keys=[{'api_key':'test-key','billing_group':'tfnsw-account','provider':'nsw'}]
+        with patch('src.services.commute_pool.NSWTransit.calculate',return_value=None) as request:
+            for _ in range(2):
+                pool=CommutePool(self.state,keys=keys)
+                try:self.assertIsNone(pool.calculate(prop,'UNSW'))
+                finally:pool.close()
+            self.assertEqual(request.call_count,1)
 
 
 if __name__=='__main__': unittest.main()

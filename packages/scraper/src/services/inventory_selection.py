@@ -15,7 +15,7 @@ def address_key(prop):
     address = normalized_address(prop.address_line1)
     if re.search(r'\b(?:bed|beds|bedroom|bedrooms|furnished|level|lvl|floor)\b', address):
         return None  # An advertised floor/bed count is not an apartment number.
-    if not re.match(r'^(?:(?:unit|apartment|apt|flat)\s+)?(?:[\w-]+/)?\d[\w-]*(?:\s|/)', address):
+    if not re.match(r'^(?:(?:unit|apartment|apt|flat)\s+)?(?:[\w-]+/)?\d[\w-]*\s+.+$', address):
         return None
     return address, suburb_key(region.name), region.state, str(region.postcode)
 

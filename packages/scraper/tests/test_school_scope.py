@@ -66,8 +66,8 @@ class SchoolScopeTests(unittest.TestCase):
 
     def test_hidden_or_street_only_addresses_are_not_physical_property_groups(self):
         result=select_inventory([prop(first='Address available on request'), prop(ident='2',first='Example Street'),
-                                 prop(ident='3',first='1 bed/2-6 Willis Street')])
-        self.assertEqual(len(result['unknown_addresses']),3)
+                                 prop(ident='3',first='1 bed/2-6 Willis Street'),prop(ident='4',first='2x/Loftus Street')])
+        self.assertEqual(len(result['unknown_addresses']),4)
         self.assertEqual(result['groups'],[])
 
 

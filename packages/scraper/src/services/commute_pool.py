@@ -87,16 +87,28 @@ class CommutePool:
                 if 'NSW_ONLY_NO_FALLBACK' not in self.errors:
                     self.errors.append('NSW_ONLY_NO_FALLBACK')
                 return None
+            review_key=self.state.key('nsw-pair-review-v1',key)
+            identity={'provider':'nsw','source':prop.source.value,'house_id':prop.house_id,'school':school}
+            if self.state.get(review_key):
+                self.errors.append({**identity,'error':'NSW_PREVIOUS_UNRESOLVED'})
+                return None
             try:
                 client = NSWTransit(self.state, self.http, self.keys[0]['api_key'], self.max_calls)
                 minutes = client.calculate(prop, destination, departure)
                 if minutes is not None:
                     self.state.put(key, {'minutes': minutes, 'mode': 'transit', 'provider': 'nsw',
                         'attribution': 'Transport for NSW', 'requested_at': datetime.now(timezone.utc).isoformat()})
+                else:
+                    self.state.put(review_key,{'reason':'NSW_NO_PUBLIC_TRANSIT_ROUTE',
+                        'requested_at':datetime.now(timezone.utc).isoformat()})
                 return minutes
             except Exception as exc:
                 message = str(exc) if isinstance(exc, (RuntimeError, APILimitReached)) else type(exc).__name__
-                self.errors.append({'provider': 'nsw', 'error': message})
+                self.errors.append({**identity, 'error': message})
+                if (message in {'NSW_ADDRESS_NOT_EXACT','NSW_INVALID_JSON','NSW_INVALID_RESPONSE',
+                                'ReadTimeout','ConnectTimeout','ConnectionError','JSONDecodeError'}
+                        or 'previous failed or uncertain request' in message):
+                    self.state.put(review_key,{'reason':message,'requested_at':datetime.now(timezone.utc).isoformat()})
                 if (isinstance(exc,APILimitReached) or message in
                         {'NSW_HTTP_401','NSW_HTTP_403','NSW_HTTP_429','NSW_HTTP_500',
                          'NSW_HTTP_502','NSW_HTTP_503','ReadTimeout','ConnectTimeout','ConnectionError'}):

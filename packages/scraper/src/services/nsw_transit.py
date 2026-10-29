@@ -13,6 +13,16 @@ class NSWTransitError(RuntimeError):
     pass
 
 
+def street_key(value):
+    # TfNSW's address index uses these observed Australian abbreviations.
+    # This compares provider evidence; it never changes property/cache identity.
+    value = normalized_address(value)
+    parts = value.split()
+    if parts:
+        parts[-1] = {'tce':'terrace','cr':'crescent','qy':'quay'}.get(parts[-1],parts[-1])
+    return ' '.join(parts)
+
+
 def compact_response(endpoint,data):
     """Cache route evidence, without duplicating large stop catalogues/shapes."""
     result={key:data[key] for key in ('version','systemMessages') if key in data}
@@ -52,7 +62,7 @@ def journey_minutes(data):
             continue
         classes = [leg.get('transportation', {}).get('product', {}).get('class') for leg in legs]
         # TfNSW uses both 99 and 100 for footpath legs.
-        if any(value not in {1, 4, 5, 7, 9, 11, 99, 100} for value in classes):
+        if any(value not in {1, 2, 4, 5, 7, 9, 11, 99, 100} for value in classes):
             continue
         try:
             start = datetime.fromisoformat(legs[0]['origin']['departureTimePlanned'].replace('Z', '+00:00'))
@@ -130,8 +140,8 @@ class NSWTransit:
             if origin:
                 number, _, street = address.split(',', 1)[0].strip().partition(' ')
                 postcode = re.search(r'\bNSW\s+(\d{4})\b', address, re.I)
-                if (str(location.get('buildingNumber', '')) != number
-                        or normalized_address(location.get('streetName', '')) != normalized_address(street)
+                if (str(location.get('buildingNumber', '')).strip().casefold() != number.casefold()
+                        or street_key(location.get('streetName', '')) != street_key(street)
                         or not postcode or str(location.get('postCode', '')) != postcode.group(1)):
                     continue
             elif address.split(',',1)[0].casefold() not in location.get('name','').casefold():
