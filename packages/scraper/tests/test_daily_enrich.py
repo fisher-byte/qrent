@@ -4,6 +4,9 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from datetime import datetime
+from unittest.mock import patch
+import subprocess
 
 from ops.enrichment_queue import cohort_subset,save_frozen
 from src.services.enrichment_state import EnrichmentState
@@ -53,6 +56,29 @@ class DailyEnrichmentTests(unittest.TestCase):
                 state.put(state.key('model-provider-hold-v1',key),{'reason':'Arrearage'})
                 self.assertFalse(authorized(root,release))
                 self.assertIsNotNone(state.get(state.key('model-provider-hold-v1',key)))
+
+    def test_daily_provider_exit_three_runs_the_model_free_path_and_records_the_real_partial_result(self):
+        daily=self.module('ops.daily_enrich')
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);release=root/'releases/recovery-20261027';release.mkdir(parents=True)
+            save_frozen(root/'output/school-daily-20261030/run_result.json',{'run':'test-day','status':'success'})
+            save_frozen(root/'enrichment/bootstrap-first-pass.json',{'status':'processed'})
+            calls=[]
+            def run(command,**kwargs):
+                calls.append(command)
+                if len(calls)==2:return subprocess.CompletedProcess(command,3)
+                if len(calls)==3:
+                    self.assertIn('--skip-model',command)
+                    save_frozen(root/'output/school-enrichment-test-day/queue/result.json',
+                        {'addresses':2,'published_addresses':1,'held_addresses':1})
+                return subprocess.CompletedProcess(command,0)
+            with patch('ops.daily_enrich.subprocess.run',side_effect=run), \
+                    patch('ops.daily_enrich.model_authorized',return_value=True):
+                result=daily.run_daily(root,datetime(2026,10,30))
+            self.assertEqual(result['status'],'processed_with_held_records')
+            self.assertFalse(result['models_enabled'])
+            self.assertEqual((result['published_addresses'],result['held_addresses']),(1,1))
+            self.assertTrue((root/'output/school-enrichment-test-day/model-paused.json').is_file())
 
 
 class EnrichmentStateContext:

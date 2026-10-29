@@ -21,6 +21,19 @@ def origin_matches(prop, returned):
                 re.search(r'\bNSW\s+'+postcode.group(1)+r'\b',returned,re.I))
 
 
+def destination_matches(expected,returned):
+    if not isinstance(returned,str):return False
+    postcode=re.search(r'\bNSW\s+(\d{4})\b',expected,re.I)
+    if not postcode or not re.search(r'\bNSW\s+'+postcode.group(1)+r'\b',returned,re.I):
+        return False
+    names={
+        'university of new south wales':('university of new south wales','unsw'),
+        'university of sydney':('university of sydney',),
+        'university of technology sydney':('university of technology sydney','uts')}
+    campus=expected.split(',',1)[0].strip().casefold()
+    return any(re.search(r'\b'+re.escape(name)+r'\b',returned,re.I) for name in names.get(campus,()))
+
+
 class DistanceTransit:
     BASE='https://api.distancematrix.ai/maps/api/distancematrix/json'
 
@@ -57,6 +70,8 @@ class DistanceTransit:
                 raise DistanceTransitError('DISTANCE_INVALID_MATRIX')
             if not origin_matches(prop,origins[0]):
                 raise DistanceTransitError('DISTANCE_ORIGIN_NOT_EXACT')
+            if not destination_matches(destination,destinations[0]):
+                raise DistanceTransitError('DISTANCE_DESTINATION_NOT_EXACT')
             element=rows[0]['elements'][0]
             if element.get('status')!='OK':
                 raise DistanceTransitError('DISTANCE_NO_TRANSIT_ROUTE')

@@ -113,7 +113,7 @@ def enrich(properties, state, *, use_api=False, max_model_calls=16, max_maps_cal
             if cached and complete_ai:
                 ai_hits += 1
                 state.put(key, cached)  # Upgrade earlier finite-TTL pilot entries.
-            elif use_api and can_enrich and config.api_key and not commute_only and not model_provider_error:
+            elif use_api and max_model_calls>0 and can_enrich and config.api_key and not commute_only and not model_provider_error:
                 invalid=ai_field_errors(prop)
                 if 'description_cn' in invalid:prop.description_cn=None
                 if 'keywords' in invalid:prop.keywords=None

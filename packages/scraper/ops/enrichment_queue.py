@@ -103,6 +103,8 @@ def run_step(job,folder,count,stage,environment,input_path=None,cohorts=None):
     with (folder/(stage+'.log')).open('a') as log:
         completed=subprocess.run(cmd,cwd=release,env=environment,stdout=log,
                                  stderr=subprocess.STDOUT,timeout=1200)
+    if stage=='score' and completed.returncode==3:
+        raise SystemExit(3)  # Preserve the provider stop for the daily cache-only fallback.
     if completed.returncode not in (0,2) or not (stage_out/'result.json').is_file():
         raise RuntimeError(stage+' stage failed; review its private log before resuming')
     result=json.loads((stage_out/'result.json').read_text())

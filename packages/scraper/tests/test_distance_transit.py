@@ -126,6 +126,28 @@ class DistanceTransitTests(unittest.TestCase):
             self.assertIsNone(self.pool.calculate(self.prop,'UNSW'))
         self.assertTrue(any('ORIGIN_NOT_EXACT' in str(x) for x in self.pool.errors))
 
+    def assert_destination_held(self,destination):
+        payload=copy.deepcopy(self.payload);payload['destination_addresses']=[destination]
+        sent=[]
+        with patch.object(self.pool.http,'get',side_effect=lambda *a,**k:(sent.append(1) or self.response(payload))):
+            self.assertIsNone(self.pool.calculate(self.prop,'UNSW'))
+            self.assertIsNone(self.pool.calculate(self.prop,'UNSW'))
+        self.assertEqual(len(sent),1)
+        self.assertTrue(any('DESTINATION_NOT_EXACT' in str(x) for x in self.pool.errors))
+        self.assertEqual(self.state.db.execute("SELECT COUNT(*) FROM calls WHERE status='OK'").fetchone()[0],0)
+
+    def test_wrong_state_destination_cannot_become_a_sydney_school_cache(self):
+        self.assert_destination_held('University of Melbourne, Parkville VIC 3010, Australia')
+
+    def test_wrong_sydney_university_cannot_become_an_unsw_cache(self):
+        self.assert_destination_held('University of Sydney, Camperdown NSW 2006, Australia')
+
+    def test_different_school_name_with_the_expected_postcode_is_still_rejected(self):
+        self.assert_destination_held('University of Sydney, Kensington NSW 2052, Australia')
+
+    def test_empty_destination_text_is_not_a_verified_campus(self):
+        self.assert_destination_held('')
+
     def test_non_success_or_empty_element_is_held_without_another_http(self):
         payload=copy.deepcopy(self.payload);payload['rows']=[]
         sent=[]

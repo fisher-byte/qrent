@@ -7,7 +7,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from ops.enrichment_queue import cohort_subset, ready_subset, runner_command, save_frozen, main
+from ops.enrichment_queue import cohort_subset, ready_subset, runner_command, save_frozen, main, run_step
 
 
 class EnrichmentQueueTests(unittest.TestCase):
@@ -61,6 +61,20 @@ class EnrichmentQueueTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index('--max-maps-calls')+1],'21')
         self.assertIn('--commute-only',cmd)
         self.assertNotIn('--publish',cmd)
+
+    def test_score_provider_stop_preserves_exit_three_for_the_daily_fallback(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as temp:
+            folder=Path(temp)
+            job={'release':str(folder),'state':str(folder/'state.db'),'source_hashes':{},
+                 'mysql_env':str(folder/'writer.env')}
+            save_frozen(folder/'score/result.json',{'status':'model_provider_unavailable'})
+            with patch('ops.enrichment_queue.subprocess.run',return_value=subprocess.CompletedProcess([],3)):
+                try:run_step(job,folder,1,'score',{})
+                except SystemExit as stopped:self.assertEqual(stopped.code,3)
+                except RuntimeError:self.fail('Provider exit 3 must reach the daily entry point')
+                else:self.fail('The model queue must stop after a provider failure')
+            self.assertEqual(json.loads((folder/'score/result.json').read_text())['status'],'model_provider_unavailable')
 
     def test_cache_only_queue_publishes_complete_subset_and_restart_skips_it(self):
         with tempfile.TemporaryDirectory() as temp:

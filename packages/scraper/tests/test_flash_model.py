@@ -10,7 +10,7 @@ from enrichment_runner import enrich, model_cost_cny
 from src.config import ScoringConfig
 from src.models import PropertyData, PropertySource
 from src.services.enrichment_state import APILimitReached, EnrichmentState
-from src.services.scoring import ScoringService, KEYWORDS_CN_SYSTEM_PROMPT
+from src.services.scoring import ScoringService, KEYWORDS_CN_SYSTEM_PROMPT, KEYWORDS_EN_SYSTEM_PROMPT, SCORING_SYSTEM_PROMPT
 from src.services.publication import chinese_keywords_valid
 
 
@@ -135,6 +135,33 @@ class FlashModelTests(unittest.TestCase):
         self.assertEqual((average,scores),(15,[14]*4+[16]*4))
         self.assertEqual(wires,['qwen-plus',PINNED_FLASH])
         self.assertEqual(rotated.response_models,{'qwen-plus',PINNED_FLASH})
+
+    def test_zero_model_audit_publishes_valid_cache_even_when_other_input_has_a_provider_hold(self):
+        import hashlib
+        from src.services.address_identity import normalized_address
+        config=ScoringConfig(api_key='offline-held-key',model_name=PINNED_FLASH)
+        def prop(identity,description):
+            return PropertyData(house_id=identity,source=PropertySource.DOMAIN,state='NSW',postcode='2042',
+                address_line1=identity+' Example Street',address_line2='newtown-nsw-2042',
+                price_per_week=600,price_text='$600 per week',description_en=description,
+                url='https://www.domain.com.au/sydney-'+identity,thumbnail_url='https://cdn.example/house.jpg')
+        missing=prop('123','A new uncached apartment with a courtyard.')
+        complete=prop('124','A cached apartment with a sunny balcony.')
+        prompt=hashlib.sha256((SCORING_SYSTEM_PROMPT+KEYWORDS_EN_SYSTEM_PROMPT+KEYWORDS_CN_SYSTEM_PROMPT).encode()).hexdigest()
+        key=self.state.key('original-ai-v1',complete.description_en,config.model_name,prompt,
+            config.num_calls,config.scores_per_call,config.temperature,config.max_tokens)
+        self.state.put(key,{'average_score':14,'scores':[14]*8,'keywords':'sunny balcony','description_cn':'采光充足，阳台'})
+        self.state.put(self.state.key('transit-permanent-v1',normalized_address(complete.address_line1),
+            normalized_address('newtown nsw 2042'),'UNSW','weekday-08:30'),{'minutes':22})
+        self.state.put(self.state.key('model-provider-hold-v1',config.api_key),{'reason':'Arrearage'})
+        with patch('enrichment_runner.ScoringConfig',return_value=config), \
+                patch('requests.sessions.Session.send',side_effect=AssertionError('No network allowed')):
+            result=enrich([missing,complete],self.state,use_api=True,max_model_calls=0,max_maps_calls=0,
+                school_targets={('domain','123'):['UNSW'],('domain','124'):['UNSW']})
+        self.assertIsNone(result['model_provider_error'])
+        self.assertEqual(result['records'][1]['checks']['UNSW'],[])
+        self.assertTrue(result['records'][0]['checks']['UNSW'])
+        self.assertEqual(result['api_usage'],[])
 
 
 if __name__=='__main__':unittest.main()
