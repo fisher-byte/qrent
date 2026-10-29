@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Process a frozen Sydney cohort through the official, bounded runner in batches.
 
-Only the scoring stage can make model requests. Auditing and publication use
+Only the scoring stage can make model requests. Optional daily transit uses
+the existing free NSW provider. Auditing and publication use
 cached model/transit results with both request caps zero. No market collection,
 new database schema, API purchase or automatic retry is performed here.
 """
@@ -63,13 +64,15 @@ def ready_subset(properties,result):
 
 
 def runner_command(release,state,input_path,cohorts,output,count,stage,mysql_env):
-    if stage not in {'score','audit','publish'} or not 0<count<=50:
+    if stage not in {'score','commute','audit','publish'} or not 0<count<=50:
         raise ValueError('Invalid bounded queue stage')
     cmd=[str(release/'.venv/bin/python'),'-u',str(release/'enrichment_runner.py'),
          '--input',str(input_path),'--cohorts',str(cohorts),'--output',str(output),
          '--state',str(state),'--enrich','--limit',str(count),
-         '--max-model-calls',str(count*5 if stage=='score' else 0),'--max-maps-calls','0']
+         '--max-model-calls',str(count*5 if stage=='score' else 0),
+         '--max-maps-calls','2000' if stage=='commute' else '0']
     if stage=='score':cmd.append('--score-only')
+    if stage=='commute':cmd.append('--commute-only')
     if stage=='publish':cmd.extend(['--publish','--mysql-env',str(mysql_env)])
     return cmd
 
@@ -83,8 +86,16 @@ def wait_for_free_queue(job):
             time.sleep(30)
 
 
+def verify_sources(job):
+    release=Path(job['release'])
+    for name,sha in job['source_hashes'].items():
+        if Path(name).is_absolute() or '..' in Path(name).parts or hashlib.sha256((release/name).read_bytes()).hexdigest()!=sha:
+            raise ValueError('Source changed; queue requires review')
+
+
 def run_step(job,folder,count,stage,environment,input_path=None,cohorts=None):
     wait_for_free_queue(job)
+    verify_sources(job)
     release=Path(job['release']);stage_out=folder/stage
     cmd=runner_command(release,Path(job['state']),input_path or folder/'input.json',
         cohorts or folder/'cohorts.json',stage_out,count,stage,Path(job['mysql_env']))
@@ -103,14 +114,14 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('job',type=Path)
     parser.add_argument('--cache-only',action='store_true')
+    parser.add_argument('--nsw-free',action='store_true',help='Fill missing routes using only the free NSW provider')
     args=parser.parse_args()
+    if args.nsw_free and args.cache_only:parser.error('--cache-only cannot request NSW routes')
     os.umask(0o077)
     job=json.loads(args.job.read_text());release=Path(job['release'])
     if release.resolve()!=Path(__file__).resolve().parents[1] or Path(job['state']).resolve()!=OFFICIAL_STATE:
         raise ValueError('Use the deployed release and the sole official ledger')
-    for name,sha in job['source_hashes'].items():
-        if Path(name).is_absolute() or '..' in Path(name).parts or hashlib.sha256((release/name).read_bytes()).hexdigest()!=sha:
-            raise ValueError('Source changed; queue requires review')
+    verify_sources(job)
     for name in ('input','cohorts'):
         if hashlib.sha256(Path(job[name]).read_bytes()).hexdigest()!=job[name+'_sha256']:
             raise ValueError('Frozen cohort changed; queue requires review')
@@ -129,6 +140,8 @@ def main():
     output=Path(job['output']);output.mkdir(parents=True,exist_ok=True)
     queue_lock=os.open(output/'.queue.lock',os.O_CREAT|os.O_RDWR,0o600)
     fcntl.flock(queue_lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    serial_lock=os.open(OFFICIAL_STATE.parent/'queue.lock',os.O_CREAT|os.O_RDWR,0o600)
+    fcntl.flock(serial_lock,fcntl.LOCK_EX)
     environment=dict(os.environ,SCRAPER_ENV_FILE=str(release/'.env'),COMMUTE_PROVIDER='nsw',
                      QRENT_MODEL_MONTHLY_CNY_LIMIT='50')
     for key in ('HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy'):
@@ -142,6 +155,7 @@ def main():
         if receipt_path.exists():
             receipt=json.loads(receipt_path.read_text())
         else:
+            if args.nsw_free:run_step(job,folder,len(batch),'commute',environment)
             score=None if args.cache_only else run_step(job,folder,len(batch),'score',environment)
             audit=run_step(job,folder,len(batch),'audit',environment)
             enriched=json.loads((folder/'audit/properties.json').read_text())
@@ -173,11 +187,13 @@ def main():
              'published_addresses':sum(r['published_addresses'] for r in receipts),'held_addresses':len(held),
              'batch_count':len(receipts),'cash_commute_requests_allowed':0,
              'model_requests_allowed':not args.cache_only,
+             'nsw_free_enabled':args.nsw_free,
              'held_input_sha256':hashlib.sha256((output/'held-input.json').read_bytes()).hexdigest(),
              'held_cohorts_sha256':hashlib.sha256((output/'held-cohorts.json').read_bytes()).hexdigest(),
              'completed_at':datetime.now(timezone.utc).isoformat()}
     write_json(output/'result.json',summary)
     print(json.dumps(summary))
+    os.close(serial_lock)
     os.close(queue_lock)
 
 

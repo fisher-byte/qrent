@@ -42,7 +42,8 @@ class DatabaseService:
                 charset=self.config.charset,
                 connect_timeout=self.config.connect_timeout,
                 use_unicode=True,
-                autocommit=False
+                autocommit=False,
+                compress=True
             )
             self.cursor = self.connection.cursor(buffered=True)
             logger.info(f"数据库连接成功: {self.config.host}/{self.config.database}")

@@ -35,13 +35,14 @@ class EnrichmentQueueTests(unittest.TestCase):
         with self.assertRaises(ValueError):ready_subset(props,result)
 
     def test_only_model_stage_has_a_positive_request_cap(self):
-        for stage in ('score','audit','publish'):
+        for stage in ('score','commute','audit','publish'):
             cmd=runner_command(Path('/release'),Path('/official.db'),Path('/in'),
                 Path('/roles'),Path('/out'),7,stage,Path('/writer.env'))
-            self.assertEqual(cmd[cmd.index('--max-maps-calls')+1],'0')
+            self.assertEqual(cmd[cmd.index('--max-maps-calls')+1],'2000' if stage=='commute' else '0')
             self.assertEqual(cmd[cmd.index('--max-model-calls')+1], '35' if stage=='score' else '0')
             self.assertEqual('--score-only' in cmd,stage=='score')
             self.assertEqual('--publish' in cmd,stage=='publish')
+            self.assertEqual('--commute-only' in cmd,stage=='commute')
 
     def test_frozen_checkpoint_refuses_different_input_instead_of_overwriting(self):
         with tempfile.TemporaryDirectory() as folder:

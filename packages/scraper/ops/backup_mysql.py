@@ -131,7 +131,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     connection = mysql.connector.connect(**config_from_env(args.env), connection_timeout=12,
-                                         autocommit=False, allow_local_infile=False)
+                                         autocommit=False, allow_local_infile=False, compress=True)
     try:
         receipt = archive(connection, args.output)
         receipt_path = args.output.with_suffix(args.output.suffix + '.receipt.json')
