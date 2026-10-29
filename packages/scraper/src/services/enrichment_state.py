@@ -28,7 +28,7 @@ class EnrichmentState:
         self.db = sqlite3.connect(path)
         path.chmod(0o600)
         self.run_id = run_id
-        self.cap_microusd = min(5_000_000, self.microusd(os.getenv('QRENT_MONTHLY_USD_LIMIT', '5')))
+        self.cap_microusd = min(4_000_000, self.microusd(os.getenv('QRENT_MONTHLY_USD_LIMIT', '4')))
         self.db.executescript('''
             CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT NOT NULL, expires REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS calls (id INTEGER PRIMARY KEY, run TEXT NOT NULL, service TEXT NOT NULL,
@@ -60,7 +60,7 @@ class EnrichmentState:
             else:
                 total = self.db.execute('SELECT COALESCE(SUM(microusd),0) FROM budget_events WHERE period=?', (period,)).fetchone()[0]
                 if total + amount > self.cap_microusd:
-                    raise APILimitReached('USD 5 monthly budget reached')
+                    raise APILimitReached('USD 4 monthly budget reached')
                 self.db.execute('INSERT INTO budget_events VALUES (?,?,?,?)', (event, period, amount, note))
             self.db.commit()
         except Exception:
@@ -83,8 +83,11 @@ class EnrichmentState:
     def reserve(self, service, group, run_limit, monthly_limit=None, usd_ceiling=0):
         # Count failed/uncertain requests conservatively, since timeouts may
         # already have reached the supplier. Keys sharing billing share limits.
-        zone = ZoneInfo('America/Los_Angeles') if service == 'maps' else timezone.utc
-        period = datetime.now(zone).strftime('%Y-%m')
+        zone = (ZoneInfo('Australia/Sydney') if service == 'nsw' else
+                ZoneInfo('America/Los_Angeles') if service == 'maps' else timezone.utc)
+        # All NSW endpoints share a daily quota. The existing period column
+        # retains old monthly Google/model records unchanged.
+        period = datetime.now(zone).strftime('%Y-%m-%d' if service == 'nsw' else '%Y-%m')
         try:
             self.db.execute('BEGIN IMMEDIATE')
             run_count = self.db.execute('SELECT COUNT(*) FROM calls WHERE run=? AND service=?',
@@ -99,7 +102,7 @@ class EnrichmentState:
                 raise ValueError('Request reservation cannot be negative')
             total = self.db.execute('SELECT COALESCE(SUM(microusd),0) FROM budget_events WHERE period=?', (budget_period,)).fetchone()[0]
             if total + amount > self.cap_microusd:
-                raise APILimitReached('USD 5 monthly budget reached')
+                raise APILimitReached('USD 4 monthly budget reached')
             cursor = self.db.execute('INSERT INTO calls (run,service,quota_group,period,status) VALUES (?,?,?,?,?)',
                                      (self.run_id, service, group, period, 'reserved'))
             self.db.execute('INSERT INTO budget_events VALUES (?,?,?,?)',

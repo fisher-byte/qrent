@@ -19,5 +19,5 @@ qrent_log="$qrent_root/logs/recovery_$(date +%Y%m%d_%H%M%S).log"
 timeout --signal=TERM --kill-after=30s 2h xvfb-run -a .venv/bin/python -u recovery_runner.py \
     --cities sydney melbourne --pages 1 --limit 100 --detail-limit 30 \
     --retries 1 --max-requests 5000 --proxy-bytes 30000000 \
-    --score --score-limit 5 --db "$qrent_root/properties.db" \
+    --db "$qrent_root/properties.db" \
     --output "$qrent_root/output/$qrent_day" "$@" 2>&1 | tee "$qrent_log"

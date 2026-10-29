@@ -22,14 +22,75 @@ class EnrichmentCostTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.state = EnrichmentState(Path(self.temp.name) / 'cache.db', 'pilot')
         self.prop = PropertyData(house_id='123', source=PropertySource.DOMAIN,
-                                 address_line1='1 Example Street', address_line2='sydney-nsw-2000',
-                                 price_per_week=600, price_text='$600 per week', state='NSW', postcode='2000',
+                                 address_line1='1 Example Street', address_line2='newtown-nsw-2042',
+                                 price_per_week=600, price_text='$600 per week', state='NSW', postcode='2042',
                                  url='https://www.domain.com.au/sydney-123',
                                  thumbnail_url='https://cdn.example/property.jpg')
 
     def tearDown(self):
         self.state.close()
         self.temp.cleanup()
+
+    def test_cash_ceiling_is_four_dollars_even_when_old_environment_requests_five(self):
+        self.state.close()
+        with patch.dict('os.environ', {'QRENT_MONTHLY_USD_LIMIT': '5'}):
+            self.state = EnrichmentState(Path(self.temp.name) / 'cache.db', 'four-dollar-cap')
+        self.assertEqual(self.state.budget_summary()['ceiling_usd'], 4)
+        self.state.record_expense('existing-paid-and-reserved', .65)
+        self.state.reserve('model', 'qwen-plus', 100, usd_ceiling=3.35)
+        with self.assertRaises(APILimitReached):
+            self.state.reserve('maps', 'one', 100, usd_ceiling=.000001)
+
+    def test_enrichment_does_not_spend_on_a_metro_listing_outside_original_school_areas(self):
+        self.prop.address_line2 = 'castle-hill-nsw-2154'
+        self.prop.description_en = 'A real listing description.'
+        with patch('enrichment_runner.CommutePool') as maps:
+            result = enrich([self.prop], self.state, use_api=True, max_model_calls=0)
+        maps.return_value.calculate.assert_not_called()
+        self.assertIn('out_of_school_scope', result['records'][0]['input_errors'])
+
+    def test_melbourne_address_only_computes_its_historical_campus(self):
+        self.prop.address_line2 = 'carlton-vic-3053'
+        self.prop.state = 'VIC'
+        self.prop.description_en = 'A real listing description.'
+        with patch('enrichment_runner.CommutePool') as maps:
+            enrich([self.prop], self.state, use_api=True, max_model_calls=0)
+        self.assertEqual([call.args[1] for call in maps.return_value.calculate.call_args_list], ['UNIMELB'])
+
+    def test_missing_nsw_key_cannot_fall_back_to_google(self):
+        with patch.dict('os.environ', {'COMMUTE_PROVIDER': 'nsw', 'NSW_API_KEY': '',
+                                       'GOOGLE_MAPS_API_KEY': 'google-key-must-not-run'}):
+            pool = CommutePool(self.state)
+        self.assertEqual(pool.keys, [])
+        pool.close()
+
+    def test_nsw_all_endpoints_share_one_daily_allowance(self):
+        with patch('src.services.enrichment_state.datetime') as clock:
+            clock.now.return_value = datetime(2026, 10, 29, 12)
+            self.state.reserve('nsw', 'same-account', 100, monthly_limit=1)
+            with self.assertRaises(APILimitReached):
+                self.state.reserve('nsw', 'same-account', 100, monthly_limit=1)
+            clock.now.return_value = datetime(2026, 10, 30, 12)
+            try:
+                self.state.reserve('nsw', 'same-account', 100, monthly_limit=1)
+                next_day_allowed = True
+            except APILimitReached:
+                next_day_allowed = False
+        self.assertTrue(next_day_allowed)
+
+    def test_commute_only_mode_never_calls_the_model_even_with_a_live_model_configuration(self):
+        self.prop.description_en='Actual description.'
+        with patch('enrichment_runner.ScoringConfig',return_value=ScoringConfig(api_key='test')), \
+                patch.object(ScoringService,'process_property') as model, \
+                patch('enrichment_runner.CommutePool') as maps:
+            maps.return_value.calculate.return_value=23
+            try:
+                result=enrich([self.prop],self.state,use_api=True,commute_only=True)
+            except TypeError:
+                self.fail('Free commute-only entry is missing')
+        model.assert_not_called()
+        self.assertEqual(maps.return_value.calculate.call_count,3)
+        self.assertEqual(result['commute_returned_pairs'],3)
 
     def test_rotation_does_not_multiply_the_shared_billing_account_quota(self):
         self.state.reserve('maps', 'same-account', 20, monthly_limit=1)
@@ -39,7 +100,7 @@ class EnrichmentCostTests(unittest.TestCase):
 
     def test_monthly_dollar_cap_is_checked_before_a_request_and_cannot_reset_on_restart(self):
         self.state.record_expense('proxy-purchase', 0.30)
-        self.state.reserve('model', 'qwen-plus', 100, usd_ceiling=4.70)
+        self.state.reserve('model', 'qwen-plus', 100, usd_ceiling=3.70)
         with self.assertRaises(APILimitReached):
             self.state.reserve('model', 'qwen-plus', 100, usd_ceiling=.000001)
         self.assertEqual(self.state.budget_summary()['remaining_usd'], 0)
@@ -48,7 +109,7 @@ class EnrichmentCostTests(unittest.TestCase):
         self.state = EnrichmentState(path, 'different-run')
         with self.assertRaises(APILimitReached):
             self.state.reserve('maps', 'one', 100, usd_ceiling=.01)
-        self.assertEqual(self.state.budget_summary()['ceiling_usd'], 5)
+        self.assertEqual(self.state.budget_summary()['ceiling_usd'], 4)
 
     def test_replayed_proxy_purchase_receipt_cannot_be_charged_twice(self):
         self.state.record_expense('same-receipt', .30)

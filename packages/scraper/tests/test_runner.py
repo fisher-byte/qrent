@@ -12,6 +12,24 @@ from src.services.sqlite_store import SQLiteStore
 
 
 class RunnerTests(unittest.TestCase):
+    def test_school_capture_keeps_query_cohort_for_adjacent_results_before_id_deduplication(self):
+        from recovery_runner import build_parser, capture
+        class Domain:
+            browser = None
+            def __init__(self, **kwargs): pass
+            def scrape_area(self, area):
+                return [listing(address_line2='alexandria-nsw-2015', suburb='Alexandria',
+                                state='NSW', postcode='2015')]
+        with tempfile.TemporaryDirectory() as tmp:
+            args = build_parser().parse_args(['--school-scope', '--cities', 'sydney',
+                '--scrapers', 'domain', '--no-details', '--retries', '0',
+                '--db', str(Path(tmp)/'p.db'), '--output', tmp])
+            with patch('recovery_runner.capture_areas', return_value=['zetland-nsw-2017','newtown-nsw-2042']):
+                result = capture(args, factories={'domain':Domain})
+            self.assertEqual(result['listings'], 1)
+            self.assertEqual(result['school_cohorts'],
+                             {school:{'domain':['123']} for school in ('UNSW','USYD','UTS')})
+
     def test_proxy_outage_keeps_direct_domain_capture(self):
         from recovery_runner import build_parser, capture
         class Domain:

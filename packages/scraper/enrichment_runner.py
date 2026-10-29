@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import json
 import logging
+import time
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +19,8 @@ from src.services.commute_pool import CommutePool
 from src.services.database import DatabaseService
 from src.services.enrichment_state import APILimitReached, EnrichmentState
 from src.services.publication import publication_errors
+from src.services.school_scope import schools_for_property
+from src.services.inventory_selection import select_inventory
 from src.services.scoring import (ScoringService, SCORING_SYSTEM_PROMPT,
                                   KEYWORDS_EN_SYSTEM_PROMPT, KEYWORDS_CN_SYSTEM_PROMPT)
 
@@ -38,7 +41,8 @@ def model_cost(model, input_tokens, output_tokens):
     return (input_tokens * input_rate + output_tokens * output_rate) / 1000000 * .20
 
 
-def enrich(properties, state, *, use_api=False, max_model_calls=16, max_maps_calls=14):
+def enrich(properties, state, *, use_api=False, max_model_calls=16, max_maps_calls=14,
+           school_targets=None, commute_only=False, progress=None):
     config = ScoringConfig()
     def guard(system_prompt, user_prompt, output_tokens):
         input_bound = len((system_prompt + user_prompt).encode()) + 1024
@@ -53,15 +57,20 @@ def enrich(properties, state, *, use_api=False, max_model_calls=16, max_maps_cal
     maps = CommutePool(state, max_calls=max_maps_calls)
     ai_hits = 0
     records = []
+    commute_required = commute_returned = blocked_inputs = 0
     prompt_sha = hashlib.sha256((SCORING_SYSTEM_PROMPT + KEYWORDS_EN_SYSTEM_PROMPT + KEYWORDS_CN_SYSTEM_PROMPT).encode()).hexdigest()
     try:
         for prop in properties:
             errors = []
-            schools = SCHOOLS.get(prop.state, [])
+            schools = ((school_targets or {}).get((prop.source.value, prop.house_id))
+                       if school_targets is not None else schools_for_property(prop)) or []
+            schools = [school for school in schools if school in SCHOOLS.get(prop.state, [])]
             # Do not spend API allowance on a record that could not be
             # published even after scoring and routes had succeeded.
             input_errors = [error for error in publication_errors(prop, schools[0] if schools else '')
                             if error not in ENRICHED_ERRORS]
+            if not schools:
+                input_errors.append('out_of_school_scope')
             can_enrich = bool(schools) and not input_errors
             # Cross-source reuse is valid only for exactly the same model input.
             key = state.key('original-ai-v1', prop.description_en or '', config.model_name, prompt_sha,
@@ -78,7 +87,7 @@ def enrich(properties, state, *, use_api=False, max_model_calls=16, max_maps_cal
             if cached and complete_ai:
                 ai_hits += 1
                 state.put(key, cached)  # Upgrade earlier finite-TTL pilot entries.
-            elif use_api and can_enrich and config.api_key:
+            elif use_api and can_enrich and config.api_key and not commute_only:
                 try:
                     scorer.process_property(prop, force_update=False)
                 except APILimitReached as exc:
@@ -92,13 +101,24 @@ def enrich(properties, state, *, use_api=False, max_model_calls=16, max_maps_cal
                     prop.commute_times.pop(school, None)
                     if minutes is not None:
                         prop.commute_times[school] = minutes
-            checks = {school: publication_errors(prop, school) for school in SCHOOLS.get(prop.state, [])}
+            checks = {school: publication_errors(prop, school) for school in schools}
+            if can_enrich:
+                commute_required += len(schools)
+                commute_returned += sum(type(prop.commute_times.get(s)) is int and 0 < prop.commute_times[s] <= 1440 for s in schools)
+            else:
+                blocked_inputs += 1
             records.append({'source': prop.source.value, 'house_id': prop.house_id, 'state': prop.state,
-                            'ai_cache_key': key, 'checks': checks, 'input_errors': input_errors,
+                            'ai_cache_key': key, 'schools': schools, 'checks': checks, 'input_errors': input_errors,
                             'errors': errors})
+            if progress:
+                progress({'processed_addresses':len(records),'selected_addresses':len(properties),
+                          'commute_required_pairs_so_far':commute_required,
+                          'commute_returned_pairs':commute_returned,'blocked_input_records':blocked_inputs,
+                          'maps_cache_hits':maps.cache_hits})
         return {'records': records, 'ai_cache_hits': ai_hits, 'maps_cache_hits': maps.cache_hits,
                 'maps_pool_entries': len(maps.keys), 'maps_errors': maps.errors, 'api_usage': state.summary(),
-                'monthly_budget': state.budget_summary()}
+                'monthly_budget': state.budget_summary(), 'commute_required_pairs':commute_required,
+                'commute_returned_pairs':commute_returned,'blocked_input_records':blocked_inputs}
     finally:
         maps.close()
 
@@ -113,26 +133,66 @@ def main():
     parser.add_argument('--max-model-calls', type=int, default=16)
     parser.add_argument('--max-maps-calls', type=int, default=14)
     parser.add_argument('--publish', action='store_true', help='Back up first, then write only complete original-schema rows')
+    parser.add_argument('--deduplicate', action='store_true', help='Group source IDs by full address; hold conflicts for review')
+    parser.add_argument('--cohorts', type=Path, help='Capture result containing original query-to-school provenance')
+    parser.add_argument('--commute-only',action='store_true',help='Never call models or publish; report transit completion separately')
     parser.add_argument('--mysql-env', type=Path, default=Path(__file__).resolve().parents[2] / '.env')
     args = parser.parse_args()
     if args.limit <= 0 or min(args.max_model_calls, args.max_maps_calls) < 0:
         parser.error('limit must be positive; request caps must be nonnegative')
     if args.publish and not args.enrich:
         parser.error('--publish requires --enrich and complete cached/live results')
+    if args.commute_only and (args.publish or not args.enrich):
+        parser.error('--commute-only requires --enrich and cannot publish')
     args.output.mkdir(parents=True, exist_ok=True)
     run = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
     state = EnrichmentState(args.state, run)
     try:
         raw = json.loads(args.input.read_text())
-        properties = [PropertyData.from_dict(dict(item)) for item in raw[:args.limit]]
+        selection, chosen, targets = None, [], None
+        if args.cohorts:
+            metadata = json.loads(args.cohorts.read_text())
+            cohorts = metadata['school_cohorts']
+            targets = {}
+            for school, sources in cohorts.items():
+                if school not in {code for codes in SCHOOLS.values() for code in codes}:
+                    raise ValueError('Unknown school in capture provenance')
+                for source, ids in sources.items():
+                    for house_id in ids:
+                        targets.setdefault((source,str(house_id)), []).append(school)
+        if args.deduplicate:
+            selection = select_inventory([PropertyData.from_dict(dict(item)) for item in raw], targets)
+            chosen = [group for group in selection['groups'] if not group['review']][:args.limit]
+            properties = [group['primary'] for group in chosen]
+            targets = {(group['primary'].source.value, group['primary'].house_id): group['schools'] for group in chosen}
+        else:
+            properties = [PropertyData.from_dict(dict(item)) for item in raw[:args.limit]]
+        last_progress = [0.0]
+        def progress(value):
+            if value['processed_addresses'] != len(properties) and time.monotonic()-last_progress[0] < 10:
+                return
+            last_progress[0]=time.monotonic()
+            value.update(run=run,updated_at=datetime.now(timezone.utc).isoformat(),
+                         api_usage=state.summary(),monthly_budget=state.budget_summary())
+            path=args.output/'progress.json';temp=path.with_suffix('.tmp')
+            temp.write_text(json.dumps(value,ensure_ascii=False,indent=2));temp.chmod(0o600);temp.replace(path)
         result = enrich(properties, state, use_api=args.enrich, max_model_calls=args.max_model_calls,
-                        max_maps_calls=args.max_maps_calls)
+                        max_maps_calls=args.max_maps_calls, school_targets=targets,
+                        commute_only=args.commute_only,progress=progress)
         result.update(run=run, source_city_counts=dict(Counter(prop.source.value + '/' + prop.state for prop in properties)),
                       mysql_written=False, publication={}, production_schema_changed=False)
-        ready = [(prop, [school for school in SCHOOLS.get(prop.state, []) if not publication_errors(prop, school)])
-                 for prop in properties]
+        ready = [(prop, [school for school in record['schools'] if not publication_errors(prop, school)])
+                 for prop, record in zip(properties, result['records'])]
         result['ready_properties'] = sum(bool(schools) for _, schools in ready)
-        result['complete_properties'] = sum(bool(schools) and len(schools) == len(SCHOOLS[prop.state]) for prop, schools in ready)
+        result['complete_properties'] = sum(bool(schools) and len(schools) == len(record['schools'])
+                                           for (_, schools), record in zip(ready, result['records']))
+        if selection is not None:
+            result['selection'] = {k:selection[k] for k in ('input_source_ids','selected_source_ids','out_of_scope_source_ids')}
+            result['selection'].update(address_groups=len(selection['groups']),
+                review_groups=sum(bool(g['review']) for g in selection['groups']),
+                unknown_address_records=len(selection['unknown_addresses']))
+            result['source_groups'] = [{'primary':[g['primary'].source.value,g['primary'].house_id],
+                'schools':g['schools'],'sources':[[p.source.value,p.house_id,p.url] for p in g['members']]} for g in chosen]
         if args.publish and result['complete_properties'] == len(properties) and properties:
             from ops.backup_mysql import archive, config_from_env
             config = config_from_env(args.mysql_env)
@@ -147,12 +207,15 @@ def main():
         publication_failed = any(s['errors'] or s['skipped'] for s in result['publication'].values())
         result['status'] = ('publication_failed' if publication_failed else 'published' if result['mysql_written'] else
                             'ready' if properties and result['complete_properties'] == len(properties) else 'incomplete')
+        if args.commute_only:
+            result['status']=('commute_complete' if result['commute_required_pairs']>0 and
+                              result['commute_returned_pairs']==result['commute_required_pairs'] else 'commute_partial')
         for filename, data in [('properties.json', [prop.to_dict() for prop in properties]), ('result.json', result)]:
             path = args.output / filename
             path.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str))
             path.chmod(0o600)
         print(json.dumps({k: v for k, v in result.items() if k != 'records'}, ensure_ascii=False, default=str))
-        return 0 if result['status'] in {'published', 'ready'} else 2
+        return 0 if result['status'] in {'published', 'ready','commute_complete'} else 2
     finally:
         state.close()
 

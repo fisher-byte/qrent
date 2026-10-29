@@ -25,6 +25,7 @@ rea_scraper.log
 *.xml
 *.json
 !src/config/metro_regions.json
+!src/config/historical_victoria_regions.json
 *.sql
 data/
 

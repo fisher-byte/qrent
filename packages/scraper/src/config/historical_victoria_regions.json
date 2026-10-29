@@ -1,0 +1,179 @@
+{
+  "version": 1,
+  "provenance": "Original MySQL properties + property_school before the four recovery inserts; postcode disambiguated against captured VIC address metadata. Carlton NSW collision is corrected only in this scope file; original rows are preserved.",
+  "schools": {
+    "MONASH": [
+      {
+        "suburb": "glen waverley",
+        "state": "VIC",
+        "postcode": "3150"
+      },
+      {
+        "suburb": "springvale",
+        "state": "VIC",
+        "postcode": "3171"
+      },
+      {
+        "suburb": "clayton",
+        "state": "VIC",
+        "postcode": "3168"
+      },
+      {
+        "suburb": "noble park",
+        "state": "VIC",
+        "postcode": "3174"
+      },
+      {
+        "suburb": "wheelers hill",
+        "state": "VIC",
+        "postcode": "3150"
+      },
+      {
+        "suburb": "notting hill",
+        "state": "VIC",
+        "postcode": "3168"
+      },
+      {
+        "suburb": "chadstone",
+        "state": "VIC",
+        "postcode": "3148"
+      },
+      {
+        "suburb": "mount waverley",
+        "state": "VIC",
+        "postcode": "3149"
+      },
+      {
+        "suburb": "oakleigh",
+        "state": "VIC",
+        "postcode": "3166"
+      },
+      {
+        "suburb": "mulgrave",
+        "state": "VIC",
+        "postcode": "3170"
+      }
+    ],
+    "MONASH_CAULFIELD": [
+      {
+        "suburb": "caulfield east",
+        "state": "VIC",
+        "postcode": "3145"
+      },
+      {
+        "suburb": "caulfield south",
+        "state": "VIC",
+        "postcode": "3162"
+      },
+      {
+        "suburb": "carnegie",
+        "state": "VIC",
+        "postcode": "3163"
+      },
+      {
+        "suburb": "caulfield north",
+        "state": "VIC",
+        "postcode": "3161"
+      },
+      {
+        "suburb": "caulfield",
+        "state": "VIC",
+        "postcode": "3162"
+      },
+      {
+        "suburb": "elsternwick",
+        "state": "VIC",
+        "postcode": "3185"
+      },
+      {
+        "suburb": "glen huntly",
+        "state": "VIC",
+        "postcode": "3163"
+      },
+      {
+        "suburb": "murrumbeena",
+        "state": "VIC",
+        "postcode": "3163"
+      }
+    ],
+    "UNIMELB": [
+      {
+        "suburb": "preston",
+        "state": "VIC",
+        "postcode": "3072"
+      },
+      {
+        "suburb": "coburg",
+        "state": "VIC",
+        "postcode": "3058"
+      },
+      {
+        "suburb": "brunswick",
+        "state": "VIC",
+        "postcode": "3056"
+      },
+      {
+        "suburb": "parkville",
+        "state": "VIC",
+        "postcode": "3052"
+      },
+      {
+        "suburb": "fitzroy",
+        "state": "VIC",
+        "postcode": "3065"
+      },
+      {
+        "suburb": "carlton",
+        "state": "VIC",
+        "postcode": "3053"
+      },
+      {
+        "suburb": "collingwood",
+        "state": "VIC",
+        "postcode": "3066"
+      },
+      {
+        "suburb": "north melbourne",
+        "state": "VIC",
+        "postcode": "3051"
+      },
+      {
+        "suburb": "thornbury",
+        "state": "VIC",
+        "postcode": "3071"
+      }
+    ],
+    "UNIMELB_SOUTHBANK": [
+      {
+        "suburb": "prahran",
+        "state": "VIC",
+        "postcode": "3181"
+      },
+      {
+        "suburb": "south yarra",
+        "state": "VIC",
+        "postcode": "3141"
+      },
+      {
+        "suburb": "st kilda",
+        "state": "VIC",
+        "postcode": "3182"
+      },
+      {
+        "suburb": "port melbourne",
+        "state": "VIC",
+        "postcode": "3207"
+      },
+      {
+        "suburb": "southbank",
+        "state": "VIC",
+        "postcode": "3006"
+      },
+      {
+        "suburb": "windsor",
+        "state": "VIC",
+        "postcode": "3181"
+      }
+    ]
+  }
+}

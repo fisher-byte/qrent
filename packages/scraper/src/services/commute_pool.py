@@ -1,8 +1,6 @@
 """Bounded Google Maps pool; billing groups, not API keys, own monthly quotas."""
 import json
 import os
-import re
-import unicodedata
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -14,21 +12,19 @@ from ..config import CommuteConfig, SCHOOL_COORDINATES
 from .commute import CommuteService
 from .enrichment_state import APILimitReached
 from .publication import has_routable_address
+from .nsw_transit import NSWTransit
+from .address_identity import normalized_address
 
 
-def normalized_address(value):
-    value = unicodedata.normalize('NFKC', value).casefold().strip()
-    value = re.sub(r'^(?:unit|apartment|apt|flat)\s+([\w-]+)\s*,?\s+(\d[\w-]*)\s+', r'\1/\2 ', value)
-    value = re.sub(r'\s+', ' ', value).rstrip('.,')
-    endings = {'st': 'street', 'rd': 'road', 'ave': 'avenue', 'av': 'avenue', 'pde': 'parade',
-               'dr': 'drive', 'cres': 'crescent', 'ct': 'court', 'pl': 'place', 'hwy': 'highway'}
-    parts = value.split()
-    if parts:
-        parts[-1] = endings.get(parts[-1].rstrip('.'), parts[-1])
-    return ' '.join(parts)
 
 
 def load_pool(path=None):
+    mode = os.getenv('COMMUTE_PROVIDER', 'google')
+    if mode == 'nsw':
+        key = os.getenv('NSW_API_KEY')
+        return [{'api_key': key, 'billing_group': 'tfnsw-account', 'provider': 'nsw'}] if key else []
+    if mode != 'google':
+        raise ValueError('Provider not enabled; no automatic paid or bonus fallback')
     path = path or os.getenv('GOOGLE_MAPS_POOL_FILE')
     if path:
         data = json.loads(Path(path).read_text())
@@ -83,6 +79,29 @@ class CommutePool:
         if cached:
             self.cache_hits += 1
             return cached['minutes']
+        if self.keys and self.keys[0]['provider'] == 'nsw':
+            group=self.keys[0]['billing_group']
+            if group in self.disabled:
+                return None
+            if prop.state != 'NSW':
+                if 'NSW_ONLY_NO_FALLBACK' not in self.errors:
+                    self.errors.append('NSW_ONLY_NO_FALLBACK')
+                return None
+            try:
+                client = NSWTransit(self.state, self.http, self.keys[0]['api_key'], self.max_calls)
+                minutes = client.calculate(prop, destination, departure)
+                if minutes is not None:
+                    self.state.put(key, {'minutes': minutes, 'mode': 'transit', 'provider': 'nsw',
+                        'attribution': 'Transport for NSW', 'requested_at': datetime.now(timezone.utc).isoformat()})
+                return minutes
+            except Exception as exc:
+                message = str(exc) if isinstance(exc, (RuntimeError, APILimitReached)) else type(exc).__name__
+                self.errors.append({'provider': 'nsw', 'error': message})
+                if (isinstance(exc,APILimitReached) or message in
+                        {'NSW_HTTP_401','NSW_HTTP_403','NSW_HTTP_429','NSW_HTTP_500',
+                         'NSW_HTTP_502','NSW_HTTP_503','ReadTimeout','ConnectTimeout','ConnectionError'}):
+                    self.disabled.add(group)
+                return None
         for entry in self.keys:
             group = entry['billing_group']
             if group in self.disabled:

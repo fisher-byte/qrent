@@ -19,6 +19,7 @@ from src.config import ScraperConfig, TARGET_AREAS, settings
 from src.scrapers import DomainScraper, RealEstateScraper
 from src.services.incremental import complete_postcodes, reuse_details
 from src.services.sqlite_store import SQLiteStore
+from src.services.school_scope import capture_areas, schools_for_area
 from src.utils.network import ProxyPool, TrafficBudget, set_run_budget
 from src.utils.egress import EgressProxy
 
@@ -60,6 +61,7 @@ def build_parser():
     parser.add_argument("--proxy-bytes", type=positive, default=int(os.getenv("SCRAPER_MAX_PROXY_BYTES", "30000000")))
     parser.add_argument("--skip-proxy-check", action="store_true", help="Use only with a previously verified AU session")
     parser.add_argument("--keep-profiles", action="store_true", help="Retain temporary browser profiles for diagnosis")
+    parser.add_argument("--school-scope", action="store_true", help="Original Sydney university areas and historical VIC campus cohorts")
     return parser
 
 
@@ -102,7 +104,7 @@ def capture(args, factories=None):
     os.environ["PROXY_SESSION"] = uuid.uuid4().hex[:12]
     result = {"run": tag, "status": "failed", "exit_code": 1, "listings": 0, "reused": 0,
               "detail_requests": 0, "details_failed": 0, "areas": [], "errors": [], "scored": 0,
-              "postcodes_completed": 0}
+              "postcodes_completed": 0, "school_cohorts": {}}
     areas = args.areas or list(dict.fromkeys(area for city in args.cities for area in CITY_AREAS[city]))
     if any(not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", area) for area in areas):
         result["errors"].append({"stage": "configuration", "error": "Invalid area slug"})
@@ -129,7 +131,9 @@ def capture(args, factories=None):
                                              "error": type(exc).__name__})
                     logger.error("AU proxy unavailable; Real Estate skipped: %s", type(exc).__name__)
                     continue
-            for area in areas:
+            source_areas = (capture_areas(args.cities, source)
+                            if getattr(args, 'school_scope', False) and not args.areas else areas)
+            for area in source_areas:
                 if budget.exhausted:
                     result["errors"].append({"source": source, "area": area, "error": "Budget reached"})
                     break
@@ -147,6 +151,17 @@ def capture(args, factories=None):
                         if not props or getattr(scraper, "last_run_error", None):
                             raise RuntimeError("No valid listings or incomplete listing scan")
                         props = list({prop.house_id: prop for prop in props}.values())[:args.limit]
+                        if getattr(args, 'school_scope', False):
+                            # The original university pipeline assigns results
+                            # to the school whose configured query found them.
+                            # Preserve this even when the source ID was already
+                            # observed in another overlapping target area. The
+                            # provider may include adjacent suburbs; the old
+                            # pipeline did not reassign them by address.
+                            item['query_schools'] = schools_for_area(area, source)
+                            for school in item['query_schools']:
+                                cohort = result['school_cohorts'].setdefault(school, {}).setdefault(source, [])
+                                cohort[:] = sorted(set(cohort) | {prop.house_id for prop in props})
                         props = [prop for prop in props if (source, prop.house_id) not in collected]
                         if not args.full_details:
                             result["postcodes_completed"] += complete_postcodes(props, references)
@@ -193,6 +208,7 @@ def capture(args, factories=None):
                                           ignore_errors=True)
                 result["areas"].append(item)
         result["listings"] = len(collected)
+        result["captured_source_ids"] = [list(identity) for identity in collected]
         if not result["errors"] and collected:
             result.update(status="success", exit_code=0)
         elif collected:

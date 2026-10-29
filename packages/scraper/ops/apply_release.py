@@ -52,7 +52,14 @@ def apply(archive, expected_sha, root):
                 temp = dest.with_suffix(dest.suffix + '.update')
                 temp.write_bytes(data)
                 temp.replace(dest)
-            environment = dict(os.environ, SCRAPER_ENV_FILE=str(release / '.env'))
+            # Acceptance tests must not inherit live credentials or consume
+            # model/map allowance. The active private environment is untouched.
+            offline = backup / 'offline-test.env'
+            credentials = ('GOOGLE_MAPS_API_KEY','NSW_API_KEY','DASHSCOPE_API_KEY',
+                           'PROPERTY_RATING_API_KEY','QWEN_API_KEY')
+            offline.write_text('\n'.join(name+'=' for name in credentials) + '\nCOMMUTE_PROVIDER=google\n')
+            environment = dict(os.environ, SCRAPER_ENV_FILE=str(offline), COMMUTE_PROVIDER='google',
+                               **{name:'' for name in credentials})
             with (backup / 'tests.log').open('w') as log:
                 tests = subprocess.run([str(release / '.venv/bin/python'), '-m', 'unittest', 'discover', '-s', 'tests', '-v'],
                     cwd=release, env=environment, stdout=log, stderr=subprocess.STDOUT, timeout=240)

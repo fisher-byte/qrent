@@ -25,8 +25,8 @@ def deploy(host, root):
                    cwd=scraper, check=True)
     for script in (scraper / 'ops').glob('*.sh'):
         subprocess.run(['bash', '-n', str(script)], check=True)
-    paths = [scraper / 'recovery_runner.py', scraper / 'metro_runner.py', scraper / 'enrichment_runner.py',
-             scraper / 'src/config/metro_regions.json']
+    paths = [scraper / 'recovery_runner.py', scraper / 'metro_runner.py', scraper / 'enrichment_runner.py']
+    paths.extend((scraper / 'src/config').glob('*.json'))
     paths.extend(scraper.glob('requirements*.txt'))
     for folder in ('src', 'tests', 'ops'):
         paths.extend((scraper / folder).rglob('*.py'))
