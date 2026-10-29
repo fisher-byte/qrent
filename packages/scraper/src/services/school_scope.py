@@ -60,7 +60,7 @@ def capture_areas(cities, source):
                 continue
             # Identical postcode URLs must not be fetched once per school or
             # once per suburb sharing that postcode.
-            identity = (item['state'], item['postcode']) if source == 'realestate' and item['slug'] != 'sydney-city-nsw' else item['slug']
+            identity = (item['state'], item['postcode']) if source == 'realestate' else item['slug']
             if identity not in seen:
                 seen.add(identity)
                 selected.append(item['slug'])
@@ -71,6 +71,8 @@ def schools_for_area(slug, source):
     """Attach query provenance before de-duplicating observations, as the old pipeline did."""
     def identity(value):
         if source == 'realestate':
+            if value == 'sydney-city-nsw':
+                return 'NSW', '2000'
             postcode = re.search(r'\d{4}', value)
             if postcode:
                 state = 'VIC' if '-vic-' in value else 'NSW'
@@ -78,3 +80,20 @@ def schools_for_area(slug, source):
         return value
     return [school for school, areas in school_areas().items()
             if any(identity(item['slug']) == identity(slug) for item in areas)]
+
+
+def targets_from_capture(metadata):
+    """Only persisted source identities may inherit a query's school roles."""
+    captured={(str(source),str(house_id)) for source,house_id in metadata['captured_source_ids']}
+    result={}
+    for school,sources in metadata['school_cohorts'].items():
+        if school not in school_areas():
+            raise ValueError('Unknown school in capture provenance')
+        for source,ids in sources.items():
+            if source not in {'domain','realestate'}:
+                raise ValueError('Unknown source in capture provenance')
+            for house_id in ids:
+                identity=(source,str(house_id))
+                if identity in captured:
+                    result.setdefault(identity,[]).append(school)
+    return result

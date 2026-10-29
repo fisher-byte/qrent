@@ -53,7 +53,8 @@ class RealEstateScraper(BaseScraper):
     SOURCE = PropertySource.REALESTATE
     BASE_URL = "https://www.realestate.com.au"
     
-    def __init__(self, config: ScraperConfig = None, profile_dir: str = None):
+    def __init__(self, config: ScraperConfig = None, profile_dir: str = None,
+                 geoip_address: str = None):
         """
         初始化爬虫
         
@@ -64,6 +65,7 @@ class RealEstateScraper(BaseScraper):
         super().__init__(config)
         self.profile_dir = profile_dir or os.path.join(os.getcwd(), 'rea_profile')
         self.browser = None
+        self.geoip_address = geoip_address
         self.detail_count = 0  # 详情页计数器
     
     def _reset_profile(self):
@@ -106,6 +108,8 @@ class RealEstateScraper(BaseScraper):
     
     def _extract_postcode(self, area: str) -> Optional[str]:
         """从区域字符串提取邮编"""
+        if area == 'sydney-city-nsw':
+            return '2000'  # Original Sydney City cohort; canonical REA postcode URL.
         match = re.search(r'(\d{4})', area)
         if match:
             return match.group(1)
@@ -121,7 +125,8 @@ class RealEstateScraper(BaseScraper):
             self.browser = BrowserManager(
                 browser_type=BrowserType.PLAYWRIGHT,
                 source="realestate",
-                profile_dir=self.profile_dir
+                profile_dir=self.profile_dir,
+                geoip_address=self.geoip_address
             )
             self.browser.create_driver()
             logger.info("Playwright 浏览器已启动")

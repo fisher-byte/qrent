@@ -1,5 +1,6 @@
 import sys
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -17,6 +18,12 @@ def prop(source='domain', ident='123', first='2/18 Example Street', area='newtow
 
 
 class SchoolScopeTests(unittest.TestCase):
+    def test_realestate_passes_verified_geolocation_to_the_browser(self):
+        with patch('src.scrapers.realestate.BrowserManager') as browser:
+            scraper=RealEstateScraper(profile_dir='unused-unit-profile',geoip_address='203.0.113.7')
+            scraper._ensure_browser()
+            self.assertEqual(browser.call_args.kwargs['geoip_address'],'203.0.113.7')
+
     def test_sydney_preserves_original_ten_areas_per_university_and_overlap(self):
         self.assertEqual({s:len(v) for s,v in TARGET_AREAS.items()}, {'UNSW':10,'USYD':10,'UTS':10})
         self.assertEqual(schools_for_property(prop()), ['UNSW','USYD','UTS'])
@@ -30,6 +37,9 @@ class SchoolScopeTests(unittest.TestCase):
         urls=[scraper.get_search_url(area) for area in areas]
         self.assertEqual(len(urls),len(set(urls)))
         self.assertIn('sydney-city-nsw', areas)
+        self.assertEqual(scraper.get_search_url('sydney-city-nsw'),
+                         'https://www.realestate.com.au/rent/in-2000/list-1')
+        self.assertEqual(len(urls),19)
 
     def test_state_and_campus_are_not_inferred_from_a_colliding_suburb_name(self):
         self.assertEqual(schools_for_property(prop(area='carlton-vic-3053',state='VIC')), ['UNIMELB'])

@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import sys
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -104,12 +105,15 @@ def capture(args, factories=None):
     os.environ["PROXY_SESSION"] = uuid.uuid4().hex[:12]
     result = {"run": tag, "status": "failed", "exit_code": 1, "listings": 0, "reused": 0,
               "detail_requests": 0, "details_failed": 0, "areas": [], "errors": [], "scored": 0,
-              "postcodes_completed": 0, "school_cohorts": {}}
+              "postcodes_completed": 0, "school_cohorts": {},
+              "school_scope": getattr(args,'school_scope',False),"max_pages_per_area":args.pages,
+              "requested_cities":args.cities}
     areas = args.areas or list(dict.fromkeys(area for city in args.cities for area in CITY_AREAS[city]))
     if any(not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", area) for area in areas):
         result["errors"].append({"stage": "configuration", "error": "Invalid area slug"})
         return result
     store = None
+    owned_profiles = set()
     try:
         store = SQLiteStore(args.db)
         references = [] if args.full_details else store.recent()
@@ -123,9 +127,14 @@ def capture(args, factories=None):
         # Domain has the first opportunity to provide complete data.
         sources = sorted(dict.fromkeys(args.scrapers), key=lambda source: source != "domain")
         for source in sources:
+            verified_ip, verified_at, verified_session = None, 0, None
             if source == "realestate" and not args.skip_proxy_check:
                 try:
-                    result["exit"] = verify_au_proxy(source, budget)
+                    verified = verify_au_proxy(source, budget, include_ip=True)
+                    verified_ip = verified.pop('ip')
+                    verified_at = time.monotonic()
+                    verified_session = os.environ['PROXY_SESSION']
+                    result["exit"] = verified
                 except Exception as exc:
                     result["errors"].append({"source": source, "stage": "proxy_check",
                                              "error": type(exc).__name__})
@@ -142,10 +151,25 @@ def capture(args, factories=None):
                 for attempt in range(args.retries + 1):
                     item["attempts"] += 1
                     if attempt:
+                        if not args.keep_profiles:
+                            shutil.rmtree(args.output / 'profiles' / f"{source}-{os.environ['PROXY_SESSION']}",
+                                          ignore_errors=True)
                         os.environ["PROXY_SESSION"] = uuid.uuid4().hex[:12]
-                    scraper = factories[source](config=ScraperConfig(max_pages=args.pages, retain_browser=True),
-                        profile_dir=str(args.output / "profiles" / f"{source}-{os.environ['PROXY_SESSION']}"))
+                    profile = args.output / 'profiles' / f"{source}-{os.environ['PROXY_SESSION']}"
+                    owned_profiles.add(profile)
+                    scraper = None
                     try:
+                        if source == 'realestate' and not args.skip_proxy_check and (
+                                verified_session != os.environ['PROXY_SESSION'] or time.monotonic() - verified_at > 300):
+                            verified = verify_au_proxy(source, budget, include_ip=True)
+                            verified_ip = verified.pop('ip'); verified_at = time.monotonic()
+                            verified_session = os.environ['PROXY_SESSION']
+                            result['exit'] = verified
+                        options = dict(config=ScraperConfig(max_pages=args.pages, retain_browser=True),
+                                       profile_dir=str(profile))
+                        if source == 'realestate':
+                            options['geoip_address'] = verified_ip
+                        scraper = factories[source](**options)
                         props = scraper.scrape_area(area)
                         # A nonempty prefix followed by an error is still incomplete.
                         if not props or getattr(scraper, "last_run_error", None):
@@ -203,9 +227,6 @@ def capture(args, factories=None):
                         if getattr(scraper, "browser", None):
                             scraper.browser.close()
                             scraper.browser = None
-                        if not args.keep_profiles:
-                            shutil.rmtree(args.output / "profiles" / f"{source}-{os.environ['PROXY_SESSION']}",
-                                          ignore_errors=True)
                 result["areas"].append(item)
         result["listings"] = len(collected)
         result["captured_source_ids"] = [list(identity) for identity in collected]
@@ -217,6 +238,9 @@ def capture(args, factories=None):
         result["errors"].append({"stage": "preflight", "error": type(exc).__name__})
         logger.error("Capture stopped: %s", type(exc).__name__)
     finally:
+        if not args.keep_profiles:
+            for profile in owned_profiles:
+                shutil.rmtree(profile, ignore_errors=True)
         if store:
             store.close()
         result["traffic"] = budget.snapshot()

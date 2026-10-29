@@ -12,6 +12,55 @@ from src.services.sqlite_store import SQLiteStore
 
 
 class RunnerTests(unittest.TestCase):
+    def test_a_failed_ip_check_after_rotation_cannot_reuse_the_previous_exit(self):
+        from recovery_runner import build_parser, capture
+        observed=[]
+        class RealEstate:
+            browser=None
+            def __init__(self, **kwargs):observed.append(kwargs.get('geoip_address'))
+            def scrape_area(self, area):
+                if area.startswith('newtown'):raise RuntimeError('Blocked query')
+                return [listing(PropertySource.REALESTATE)]
+        with tempfile.TemporaryDirectory() as tmp:
+            args=build_parser().parse_args(['--areas','newtown-nsw-2042','kensington-nsw-2033',
+                '--scrapers','realestate','--no-details','--retries','1','--db',str(Path(tmp)/'p.db'),'--output',tmp])
+            with patch('recovery_runner.verify_au_proxy',side_effect=[{'country':'AU','ip':'203.0.113.7'},
+                    RuntimeError('Verification failed'),{'country':'AU','ip':'203.0.113.9'}]):
+                capture(args,factories={'realestate':RealEstate})
+            self.assertEqual(observed,['203.0.113.7','203.0.113.9'])
+
+    def test_realestate_reuses_verified_ip_for_browser_geolocation_without_public_ip_rediscovery(self):
+        from recovery_runner import build_parser, capture
+        seen=[]
+        class RealEstate:
+            browser=None
+            def __init__(self, **kwargs):seen.append(kwargs.get('geoip_address'))
+            def scrape_area(self, area):return [listing(PropertySource.REALESTATE)]
+        with tempfile.TemporaryDirectory() as tmp:
+            args=build_parser().parse_args(['--areas','newtown-nsw-2042','--scrapers','realestate',
+                '--no-details','--retries','0','--db',str(Path(tmp)/'p.db'),'--output',tmp])
+            with patch('recovery_runner.verify_au_proxy',return_value={'country':'AU','ip':'203.0.113.7'}):
+                result=capture(args,factories={'realestate':RealEstate})
+            self.assertEqual(seen,['203.0.113.7'])
+            self.assertNotIn('ip',result['exit'])
+
+    def test_profiles_keep_cookies_and_resource_cache_between_areas_and_cleanup_after_capture(self):
+        from recovery_runner import build_parser, capture
+        observed=[];paths=[]
+        class Domain:
+            browser=None
+            def __init__(self, profile_dir, **kwargs):
+                self.path=Path(profile_dir);paths.append(self.path)
+                observed.append((self.path/'cache-marker').exists())
+                self.path.mkdir(parents=True,exist_ok=True);(self.path/'cache-marker').write_text('test')
+            def scrape_area(self, area):return [listing()]
+        with tempfile.TemporaryDirectory() as tmp:
+            args=build_parser().parse_args(['--areas','newtown-nsw-2042','kensington-nsw-2033',
+                '--scrapers','domain','--no-details','--retries','0','--db',str(Path(tmp)/'p.db'),'--output',tmp])
+            capture(args,factories={'domain':Domain})
+            self.assertEqual(observed,[False,True])
+            self.assertTrue(all(not path.exists() for path in paths))
+
     def test_school_capture_keeps_query_cohort_for_adjacent_results_before_id_deduplication(self):
         from recovery_runner import build_parser, capture
         class Domain:

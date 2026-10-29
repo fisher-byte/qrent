@@ -19,7 +19,7 @@ from src.services.commute_pool import CommutePool
 from src.services.database import DatabaseService
 from src.services.enrichment_state import APILimitReached, EnrichmentState
 from src.services.publication import publication_errors
-from src.services.school_scope import schools_for_property
+from src.services.school_scope import schools_for_property, targets_from_capture
 from src.services.inventory_selection import select_inventory
 from src.services.scoring import (ScoringService, SCORING_SYSTEM_PROMPT,
                                   KEYWORDS_EN_SYSTEM_PROMPT, KEYWORDS_CN_SYSTEM_PROMPT)
@@ -151,15 +151,7 @@ def main():
         raw = json.loads(args.input.read_text())
         selection, chosen, targets = None, [], None
         if args.cohorts:
-            metadata = json.loads(args.cohorts.read_text())
-            cohorts = metadata['school_cohorts']
-            targets = {}
-            for school, sources in cohorts.items():
-                if school not in {code for codes in SCHOOLS.values() for code in codes}:
-                    raise ValueError('Unknown school in capture provenance')
-                for source, ids in sources.items():
-                    for house_id in ids:
-                        targets.setdefault((source,str(house_id)), []).append(school)
+            targets = targets_from_capture(json.loads(args.cohorts.read_text()))
         if args.deduplicate:
             selection = select_inventory([PropertyData.from_dict(dict(item)) for item in raw], targets)
             chosen = [group for group in selection['groups'] if not group['review']][:args.limit]
