@@ -11,6 +11,7 @@ import logging
 import time
 from collections import Counter
 from datetime import datetime, timezone
+from dataclasses import replace
 from pathlib import Path
 
 from src.config import DatabaseConfig, ScoringConfig
@@ -23,7 +24,7 @@ from src.services.school_scope import schools_for_property, targets_from_capture
 from src.services.inventory_selection import select_inventory
 from src.services.scoring import (ScoringService, SCORING_SYSTEM_PROMPT,
                                   KEYWORDS_EN_SYSTEM_PROMPT, KEYWORDS_CN_SYSTEM_PROMPT,
-                                  ModelProviderUnavailable)
+                                  ModelProviderUnavailable, MULTIMODAL_FLASH_MODELS)
 
 
 SCHOOLS = {'NSW': ['UNSW', 'USYD', 'UTS'],
@@ -35,10 +36,17 @@ ENRICHED_ERRORS = {'description_cn', 'keywords', 'complete_ai_scores', 'commute_
 def model_cost_cny(model, input_tokens, output_tokens):
     # Verified Beijing non-thinking list prices. Model budget is native CNY.
     rates = {'qwen-plus': (.8, 2), 'qwen-flash': (.15, 1.5)}
-    if model not in rates or input_tokens > 128000:
+    rates.update({name:(.2,.8) for name in MULTIMODAL_FLASH_MODELS})
+    input_limit=32000 if model in MULTIMODAL_FLASH_MODELS else 128000
+    if model not in rates or input_tokens > input_limit:
         raise APILimitReached('Model pricing requires review before API use')
     input_rate, output_rate = rates[model]
     return (input_tokens * input_rate + output_tokens * output_rate) / 1000000
+
+
+def complete_ai_cache(prop, value):
+    return (isinstance(value,dict) and all(name in value for name in AI_FIELDS)
+            and not ai_field_errors(replace(prop,**{name:value[name] for name in AI_FIELDS})))
 
 
 def enrich(properties, state, *, use_api=False, max_model_calls=16, max_maps_calls=14,
@@ -78,6 +86,19 @@ def enrich(properties, state, *, use_api=False, max_model_calls=16, max_maps_cal
             key = state.key('original-ai-v1', prop.description_en or '', config.model_name, prompt_sha,
                             config.num_calls, config.scores_per_call, config.temperature, config.max_tokens)
             cached = state.get(key)
+            cache_model=config.model_name
+            if not complete_ai_cache(prop,cached):
+                # Preserve completed evaluations when credentials or the model
+                # change. Only full, validated results with identical inputs,
+                # prompts and rating parameters qualify; retain their origin.
+                for model in ('qwen-plus','qwen-flash',*sorted(MULTIMODAL_FLASH_MODELS)):
+                    if model==config.model_name:continue
+                    previous_key=state.key('original-ai-v1',prop.description_en or '',model,prompt_sha,
+                        config.num_calls,config.scores_per_call,config.temperature,config.max_tokens)
+                    previous=state.get(previous_key)
+                    if complete_ai_cache(prop,previous):
+                        key,cached,cache_model=previous_key,previous,model
+                        break
             if cached:
                 for name in AI_FIELDS:
                     setattr(prop, name, cached[name])
@@ -119,7 +140,7 @@ def enrich(properties, state, *, use_api=False, max_model_calls=16, max_maps_cal
             else:
                 blocked_inputs += 1
             records.append({'source': prop.source.value, 'house_id': prop.house_id, 'state': prop.state,
-                            'ai_cache_key': key, 'schools': schools, 'checks': checks, 'input_errors': input_errors,
+                            'ai_cache_key': key, 'ai_model':cache_model, 'schools': schools, 'checks': checks, 'input_errors': input_errors,
                             'errors': errors})
             if progress:
                 progress({'processed_addresses':len(records),'selected_addresses':len(properties),

@@ -19,6 +19,7 @@ from .enrichment_state import APILimitReached
 from .publication import chinese_keywords_valid
 
 logger = logging.getLogger(__name__)
+MULTIMODAL_FLASH_MODELS = {'qwen3.7-flash','qwen3.7-flash-2026-07-15'}
 
 
 class ModelRequestUncertain(RuntimeError):
@@ -118,6 +119,7 @@ class ScoringService:
         )
         if api_key:
             dashscope.api_key = api_key
+        self.api_key=api_key
         self.provider_hold_key = (self.response_cache.key('model-provider-hold-v1',api_key or '')
                                   if self.response_cache is not None else None)
 
@@ -159,10 +161,15 @@ class ScoringService:
                     {'role': 'system', 'content': system_prompt},
                     {'role': 'user', 'content': user_prompt}
                 ]
+                multimodal=self.config.model_name in MULTIMODAL_FLASH_MODELS
+                if multimodal:
+                    messages=[{'role':m['role'],'content':[{'text':m['content']}]} for m in messages]
+                call=dashscope.MultiModalConversation.call if multimodal else dashscope.Generation.call
                 
                 formal = self.response_cache is not None
                 with SingleAttemptModelSession() if formal else nullcontext() as session:
-                    response = dashscope.Generation.call(
+                    response = call(
+                        api_key=self.api_key,
                         model=self.config.model_name,
                         messages=messages,
                         result_format='message',
@@ -170,6 +177,7 @@ class ScoringService:
                         max_tokens=self.config.max_tokens,
                         top_p=0.9,
                         enable_thinking=False,
+                        enable_search=False,
                         **({'session':session, 'timeout':90} if formal else {})
                     )
                 if self.call_observer:
@@ -178,6 +186,8 @@ class ScoringService:
                 
                 if response.status_code == 200:
                     content=response.output.choices[0]['message']['content']
+                    if multimodal and isinstance(content,list):
+                        content=''.join(part.get('text','') for part in content if isinstance(part,dict))
                     if not isinstance(content,str) or not content.strip():
                         raise ValueError('Empty model response')
                     if self.response_cache is not None:
