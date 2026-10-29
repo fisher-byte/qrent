@@ -68,7 +68,7 @@ def runner_command(release,state,input_path,cohorts,output,count,stage,mysql_env
     cmd=[str(release/'.venv/bin/python'),'-u',str(release/'enrichment_runner.py'),
          '--input',str(input_path),'--cohorts',str(cohorts),'--output',str(output),
          '--state',str(state),'--enrich','--limit',str(count),
-         '--max-model-calls',str(count*4 if stage=='score' else 0),'--max-maps-calls','0']
+         '--max-model-calls',str(count*5 if stage=='score' else 0),'--max-maps-calls','0']
     if stage=='score':cmd.append('--score-only')
     if stage=='publish':cmd.extend(['--publish','--mysql-env',str(mysql_env)])
     return cmd

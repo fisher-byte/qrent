@@ -48,3 +48,15 @@ class ModelResumeTests(unittest.TestCase):
         self.assertEqual(send.call_count,1)
         self.assertEqual(self.state.db.execute('SELECT COUNT(*) FROM calls').fetchone()[0],1)
 
+    def test_wrong_language_keyword_response_gets_one_cached_repair(self):
+        def response(text):
+            result=MagicMock(status_code=200,usage={'input_tokens':100,'output_tokens':20})
+            result.output.choices=[{'message':{'content':text}}]
+            return result
+        service=self.service(10)
+        with patch('src.services.scoring.dashscope.Generation.call',
+                   side_effect=[response('private terrace, modern kitchen'),response('独立露台，现代厨房')]) as call:
+            self.assertEqual(service.extract_keywords_cn('A private terrace and a modern kitchen.'),'独立露台，现代厨房')
+            self.assertEqual(service.extract_keywords_cn('A private terrace and a modern kitchen.'),'独立露台，现代厨房')
+        self.assertEqual(call.call_count,2)
+

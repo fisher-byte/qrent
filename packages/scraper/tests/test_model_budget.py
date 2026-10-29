@@ -9,9 +9,29 @@ from src.config import ScoringConfig
 from src.models import PropertyData,PropertySource
 from src.services.scoring import ScoringService
 from enrichment_runner import enrich
+from test_enrichment import complete_property
 
 
 class ModelBudgetTests(unittest.TestCase):
+    def test_cached_wrong_language_is_repaired_without_discarding_valid_scores(self):
+        prop=complete_property();prop.state='NSW';prop.address_line2='newtown-nsw-2042'
+        def first(p,**kwargs):
+            p.scores=[14]*8;p.average_score=14;p.keywords='balcony';p.description_cn='private balcony'
+        def repair(p,**kwargs):
+            self.assertEqual(p.scores,[14]*8)
+            self.assertEqual(p.average_score,14)
+            self.assertEqual(p.keywords,'balcony')
+            self.assertIsNone(p.description_cn)
+            p.description_cn='独立阳台'
+        with patch('enrichment_runner.ScoringConfig',return_value=ScoringConfig(api_key='test')), \
+             patch.object(ScoringService,'process_property',side_effect=first):
+            enrich([prop],self.state,use_api=True,score_only=True)
+        with patch('enrichment_runner.ScoringConfig',return_value=ScoringConfig(api_key='test')), \
+             patch.object(ScoringService,'process_property',side_effect=repair) as process:
+            result=enrich([prop],self.state,use_api=True,score_only=True)
+        process.assert_called_once()
+        self.assertEqual(result['score_complete_records'],1)
+
     def test_score_only_never_makes_route_requests(self):
         prop=PropertyData(source=PropertySource.DOMAIN,house_id='123',address_line1='1 Example Street',
             address_line2='newtown-nsw-2042',state='NSW',price_per_week=600,price_text='$600 per week',

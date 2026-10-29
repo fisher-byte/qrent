@@ -39,7 +39,7 @@ class EnrichmentQueueTests(unittest.TestCase):
             cmd=runner_command(Path('/release'),Path('/official.db'),Path('/in'),
                 Path('/roles'),Path('/out'),7,stage,Path('/writer.env'))
             self.assertEqual(cmd[cmd.index('--max-maps-calls')+1],'0')
-            self.assertEqual(cmd[cmd.index('--max-model-calls')+1], '28' if stage=='score' else '0')
+            self.assertEqual(cmd[cmd.index('--max-model-calls')+1], '35' if stage=='score' else '0')
             self.assertEqual('--score-only' in cmd,stage=='score')
             self.assertEqual('--publish' in cmd,stage=='publish')
 

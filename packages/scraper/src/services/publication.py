@@ -12,6 +12,25 @@ from ..utils import extract_price, safe_datetime
 SOURCE_HOSTS = {'domain': 'domain.com.au', 'realestate': 'realestate.com.au'}
 
 
+def chinese_keywords_valid(value):
+    return bool(re.search(r'[\u4e00-\u9fff]',value or ''))
+
+
+def ai_field_errors(prop):
+    errors=[]
+    if not chinese_keywords_valid(prop.description_cn):
+        errors.append('description_cn')
+    keywords=(prop.keywords or '').strip()
+    if not keywords or re.fullmatch(r'no (?:relevant )?(?:information|keywords)(?: available)?[.!]?',keywords,re.I):
+        errors.append('keywords')
+    scores=prop.scores or []
+    valid=len(scores)==8 and all(isinstance(x,(int,float)) and math.isfinite(x) and 0<=x<=20 for x in scores)
+    if (prop.average_score is None or not math.isfinite(prop.average_score)
+            or not valid or abs(prop.average_score-sum(scores)/8)>.11):
+        errors.append('complete_ai_scores')
+    return errors
+
+
 def has_routable_address(prop):
     address = (prop.address_line1 or '').strip().replace('-', ' ')
     return bool(address and not re.search(r'address.*(?:request|withheld|undisclosed)|^contact\s+agent', address, re.I))
@@ -38,17 +57,15 @@ def publication_errors(prop: PropertyData, university: str):
         value = getattr(prop, name)
         if type(value) is not int or not 0 <= value <= 255:
             errors.append(name)
-    if not (prop.description_en or '').strip():
+    description=(prop.description_en or '').strip()
+    contact_only=(re.match(r'^(?:please\s+)?(?:message|contact|call|enquire|email)\b',description,re.I)
+        and not re.search(r'\b(?:bed(?:room)?s?|apartment|studio|house|kitchen|bath(?:room)?s?|balcon(?:y|ies)|'
+                          r'terrace|courtyard|garden|furnished|air.?conditioning|heating|wardrobe|garage|pool)\b',description,re.I))
+    if not description or contact_only:
         errors.append('description_en')
-    if not (prop.description_cn or '').strip():
-        errors.append('description_cn')
-    if not (prop.keywords or '').strip():
-        errors.append('keywords')
-    scores = prop.scores or []
-    valid_scores = len(scores) == 8 and all(isinstance(x, (int, float)) and math.isfinite(x) and 0 <= x <= 20 for x in scores)
-    if (prop.average_score is None or not math.isfinite(prop.average_score)
-            or not valid_scores or abs(prop.average_score - sum(scores) / 8) > .11):
-        errors.append('complete_ai_scores')
+    if re.match(r'^[\s*#!-]*(?:deposit\s+(?:taken|received)|leased|applications?\s+(?:approved|accepted))\b',description,re.I):
+        errors.append('inactive_listing')
+    errors.extend(ai_field_errors(prop))
     commute = prop.commute_times.get(university)
     if type(commute) is not int or not 0 < commute <= 1440:
         errors.append('commute_time')

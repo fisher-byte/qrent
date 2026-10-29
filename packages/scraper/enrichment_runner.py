@@ -18,7 +18,7 @@ from src.models import PropertyData
 from src.services.commute_pool import CommutePool
 from src.services.database import DatabaseService
 from src.services.enrichment_state import APILimitReached, EnrichmentState
-from src.services.publication import publication_errors
+from src.services.publication import publication_errors, ai_field_errors
 from src.services.school_scope import schools_for_property, targets_from_capture
 from src.services.inventory_selection import select_inventory
 from src.services.scoring import (ScoringService, SCORING_SYSTEM_PROMPT,
@@ -83,11 +83,15 @@ def enrich(properties, state, *, use_api=False, max_model_calls=16, max_maps_cal
                 # Unproven historical values cannot count as this evaluation.
                 for name in AI_FIELDS:
                     setattr(prop, name, [] if name == 'scores' else None)
-            complete_ai = len(prop.scores or []) == 8 and prop.average_score is not None and prop.keywords and prop.description_cn
+            complete_ai = not ai_field_errors(prop)
             if cached and complete_ai:
                 ai_hits += 1
                 state.put(key, cached)  # Upgrade earlier finite-TTL pilot entries.
             elif use_api and can_enrich and config.api_key and not commute_only:
+                invalid=ai_field_errors(prop)
+                if 'description_cn' in invalid:prop.description_cn=None
+                if 'keywords' in invalid:prop.keywords=None
+                if 'complete_ai_scores' in invalid:prop.average_score=None;prop.scores=[]
                 try:
                     scorer.process_property(prop, force_update=False)
                 except APILimitReached as exc:
@@ -104,8 +108,7 @@ def enrich(properties, state, *, use_api=False, max_model_calls=16, max_maps_cal
             checks = {school: publication_errors(prop, school) for school in schools}
             if can_enrich:
                 score_required+=1
-                score_complete+=int(len(prop.scores or [])==8 and prop.average_score is not None and
-                                    bool(prop.keywords) and bool(prop.description_cn))
+                score_complete+=int(not ai_field_errors(prop))
                 commute_required += len(schools)
                 commute_returned += sum(type(prop.commute_times.get(s)) is int and 0 < prop.commute_times[s] <= 1440 for s in schools)
             else:

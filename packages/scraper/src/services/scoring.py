@@ -16,6 +16,7 @@ from tqdm import tqdm
 from ..models import PropertyData
 from ..config import settings, ScoringConfig
 from .enrichment_state import APILimitReached
+from .publication import chinese_keywords_valid
 
 logger = logging.getLogger(__name__)
 
@@ -262,6 +263,14 @@ class ScoringService:
             return ""
         
         response = self._call_model(KEYWORDS_CN_SYSTEM_PROMPT, description)
+        if response and not chinese_keywords_valid(response):
+            # Preserve the original response and valid score/English caches.
+            # One separately keyed correction repairs only the invalid field.
+            response=self._call_model(KEYWORDS_CN_SYSTEM_PROMPT+
+                '\n必须使用简体中文输出每个关键词，禁止整段英文；地点和品牌名称可保留英文。',
+                description,cache_slot='keywords-cn-repair-v1')
+        if response and not chinese_keywords_valid(response):
+            return ''
         if response:
             keywords = response.strip()
             if keywords.startswith("关键词:") or keywords.startswith("关键词："):

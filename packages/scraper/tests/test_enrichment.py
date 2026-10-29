@@ -175,6 +175,23 @@ class ExistingSchoolContractTests(unittest.TestCase):
 
 
 class PublicationIntegrityTests(unittest.TestCase):
+    def test_inactive_listing_or_agent_contact_is_not_a_scorable_description(self):
+        prop=complete_property()
+        prop.description_en='Deposit Taken'
+        self.assertIn('inactive_listing',publication_errors(prop,'UNSW'))
+        prop.description_en='Please message Danielle Yu on 0432 000 000 for inspection! Do not miss out!'
+        self.assertIn('description_en',publication_errors(prop,'UNSW'))
+        prop.description_en='Contact us to inspect this sunny apartment with a private balcony.'
+        self.assertNotIn('description_en',publication_errors(prop,'UNSW'))
+
+    def test_english_text_cannot_satisfy_the_chinese_field(self):
+        prop=complete_property();prop.description_cn='private terrace, island kitchen'
+        self.assertIn('description_cn',publication_errors(prop,'UNSW'))
+        prop.description_cn='独立露台, Burwood Westfield附近'
+        self.assertNotIn('description_cn',publication_errors(prop,'UNSW'))
+        prop.keywords='no relevant information'
+        self.assertIn('keywords',publication_errors(prop,'UNSW'))
+
     def test_availability_keeps_the_australian_calendar_day_at_utc_boundary(self):
         self.assertEqual(mysql_availability('2026-11-15T00:00:00+11:00'), datetime(2026, 11, 15))
         self.assertIsNone(mysql_availability(None))
