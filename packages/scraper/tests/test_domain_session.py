@@ -1,4 +1,5 @@
 import sys
+import os
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -10,6 +11,27 @@ from test_recovery import listing
 
 
 class DomainSessionTests(unittest.TestCase):
+    def test_public_json_detail_parses_full_identity_checked_description_without_scrolling(self):
+        from datetime import datetime
+        browser=Mock();browser.navigate.return_value=True
+        prop=listing();payload={'props':{'rootGraphQuery':{'listingByIdV2':{'id':prop.house_id,
+            'headline':'Sunny home','description':'A complete description with a private balcony.',
+            'dateAvailableV2':{'isoDate':'2026-11-01'}}}}}
+        browser.get_page_source.return_value=payload
+        scraper=DomainScraper();scraper.browser=browser
+        with patch.dict(os.environ,{'DOMAIN_DETAIL_TRANSPORT':'json'}),patch('src.scrapers.domain.time.sleep'):
+            scraper.scrape_property_details([prop])
+        self.assertIn('A complete description with a private balcony.',prop.description_en)
+        self.assertEqual(prop.available_date,datetime(2026,11,1))
+        browser.scroll_page.assert_not_called();browser.close.assert_called_once()
+
+    def test_public_json_other_or_missing_listing_cannot_become_this_property_description(self):
+        for listing_payload in ({'id':'other','description':'Wrong home'},{}):
+            with self.subTest(listing=listing_payload):
+                prop=listing()
+                DomainScraper().parse_detail_page(prop,{'props':{'rootGraphQuery':{'listingByIdV2':listing_payload}}})
+                self.assertFalse(prop.description_en)
+
     def test_list_and_detail_share_one_browser_fingerprint_and_close_once(self):
         browser = Mock()
         browser.navigate.return_value = True

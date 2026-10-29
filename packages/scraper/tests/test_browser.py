@@ -23,6 +23,42 @@ class Page:
 
 
 class BrowserTests(unittest.TestCase):
+    def test_domain_ordinary_hk_browser_preserves_native_network_without_residential_routing(self):
+        context=MagicMock();context.pages=[MagicMock()]
+        with tempfile.TemporaryDirectory() as profile,patch.dict(os.environ,{
+            'DOMAIN_BROWSER_ENGINE':'camoufox','DOMAIN_NATIVE_NETWORK':'true',
+            'DOMAIN_BROWSER_PROXY':'socks5://127.0.0.1:18082','DOMAIN_PROXY_IP':'203.0.113.7'},clear=True), \
+                patch('camoufox.sync_api.Camoufox') as camoufox,patch('src.utils.browser.EgressProxy') as residential,patch('src.utils.browser.time.sleep'):
+            camoufox.return_value.__enter__.return_value=context
+            browser=BrowserManager(browser_type=BrowserType.PLAYWRIGHT,source='domain',profile_dir=profile)
+            try:
+                browser.create_driver()
+                self.assertEqual(camoufox.call_args.kwargs['proxy'],{'server':'socks5://127.0.0.1:18082'})
+                self.assertEqual(camoufox.call_args.kwargs['geoip'],'203.0.113.7')
+                self.assertFalse(browser.network_policy.proxied)
+                context.route.assert_not_called();residential.assert_not_called()
+            finally:browser.close()
+
+    def test_domain_ordinary_route_rejects_an_unverified_or_mixed_residential_proxy_before_transport(self):
+        for ordinary,paid in [('http://other.example:8080',None),
+            ('socks5://127.0.0.1:18082',{'server':'http://residential.example:8080'})]:
+            with self.subTest(ordinary=ordinary,paid=bool(paid)),tempfile.TemporaryDirectory() as profile,patch.dict(os.environ,{
+                'DOMAIN_NATIVE_NETWORK':'true','DOMAIN_BROWSER_ENGINE':'camoufox',
+                'DOMAIN_BROWSER_PROXY':ordinary,'DOMAIN_PROXY_IP':'203.0.113.7'},clear=True), \
+                    patch('src.utils.browser.ProxyPool.config',return_value=paid),patch('src.utils.browser.EgressProxy') as residential, \
+                    patch('camoufox.sync_api.Camoufox'):
+                browser=BrowserManager(browser_type=BrowserType.PLAYWRIGHT,source='domain',profile_dir=profile)
+                with self.assertRaises(ValueError):browser.create_driver()
+                residential.assert_not_called()
+
+    def test_domain_detail_json_does_not_navigate_an_html_page_and_load_its_assets(self):
+        browser=BrowserManager(browser_type=BrowserType.PLAYWRIGHT,source='domain')
+        page=MagicMock();browser._playwright_page=page
+        url='https://www.domain.com.au/2-example-street-newtown-nsw-2042-123'
+        with patch.dict(os.environ,{'DOMAIN_DETAIL_TRANSPORT':'json'}),patch.object(browser,'_fetch_domain_search',return_value=True) as public:
+            self.assertTrue(browser.navigate(url,wait_time=0))
+            public.assert_called_once_with(url);page.goto.assert_not_called()
+
     def test_realestate_fixed_preset_keeps_verified_au_geoip_and_metered_routing(self):
         from camoufox import DefaultAddons
         context = MagicMock()

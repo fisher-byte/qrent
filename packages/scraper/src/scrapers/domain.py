@@ -378,14 +378,16 @@ class DomainScraper(BaseScraper):
                         logger.warning("Domain detail navigation failed: %s", prop.house_id)
                         continue
                     
-                    # 滚动加载
-                    for _ in range(2):
-                        self.browser.scroll_page(400)
-                        self.browser.wait(0.5)
+                    # Public JSON detail props need no HTML navigation, scroll
+                    # or image/script downloads for each property.
+                    if os.getenv('DOMAIN_DETAIL_TRANSPORT')!='json':
+                        for _ in range(2):
+                            self.browser.scroll_page(400)
+                            self.browser.wait(0.5)
                     
                     html = self.browser.get_page_source()
                     
-                    if len(html) > 5000:
+                    if isinstance(html,dict) or len(html) > 5000:
                         self.parse_detail_page(prop, html)
                         logger.debug(f"详情获取成功: {prop.address_line1}")
                     
@@ -406,15 +408,16 @@ class DomainScraper(BaseScraper):
         
         return properties
     
-    def parse_detail_page(self, property_data: PropertyData, html: str) -> PropertyData:
+    def parse_detail_page(self, property_data: PropertyData, html: str | dict) -> PropertyData:
         """解析 Domain 详情页面"""
-        soup = BeautifulSoup(html, "html.parser")
+        soup = BeautifulSoup('' if isinstance(html,dict) else html, "html.parser")
         
         # The visible expander may truncate its final paragraph. The public
         # server-rendered graph contains the complete original description.
-        graph = domain_search(soup).get('rootGraphQuery') or {}
+        graph = domain_search(html if isinstance(html,dict) else soup).get('rootGraphQuery') or {}
         listing = graph.get('listingByIdV2') or {}
-        if listing and str(listing.get('id', listing.get('listingId', ''))) != str(property_data.house_id):
+        if ((isinstance(html,dict) and not listing) or
+                (listing and str(listing.get('id',listing.get('listingId','')))!=str(property_data.house_id))):
             logger.error('Domain detail identity mismatch: %s', property_data.house_id)
             return property_data
         description = self._parse_description(soup)

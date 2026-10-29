@@ -25,7 +25,8 @@ def offline_test_environment(path):
         'PROPERTY_RATING_API_KEY','QWEN_API_KEY','DISTANCE_MATRIX_API_KEY')}
     values.update(COMMUTE_PROVIDER='google',QWEN_MODEL='qwen-plus',
                   DASHSCOPE_HTTP_BASE_URL='https://dashscope.aliyuncs.com/api/v1',
-                  CAMOUFOX_ASSET_PREFLIGHT='false')
+                  CAMOUFOX_ASSET_PREFLIGHT='false',DOMAIN_BROWSER_PROXY='',
+                  DOMAIN_PROXY_IP='',DOMAIN_DETAIL_TRANSPORT='')
     path.write_text('\n'.join(k+'='+v for k,v in values.items())+'\n')
     return dict(os.environ,SCRAPER_ENV_FILE=str(path),**values)
 

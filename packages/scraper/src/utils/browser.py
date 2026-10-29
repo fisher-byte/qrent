@@ -9,6 +9,8 @@ import time
 import os
 import asyncio
 import json
+import ipaddress
+import re
 import platform
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -160,9 +162,17 @@ class BrowserManager:
 
             self.proxy_pool = ProxyPool(self.source)
             proxy = self.proxy_pool.config()
+            ordinary_domain=os.getenv('DOMAIN_BROWSER_PROXY','').strip() if self.source=='domain' else ''
+            ordinary_ip=None
+            if ordinary_domain:
+                if (ordinary_domain!='socks5://127.0.0.1:18082' or proxy or
+                        os.getenv('DOMAIN_NATIVE_NETWORK','').lower()!='true'):
+                    raise ValueError('Domain ordinary egress requires its verified native HK route, without residential transport')
+                ordinary_ip=str(ipaddress.ip_address(os.environ.get('DOMAIN_PROXY_IP','')))
             if proxy:
                 self.egress_proxy = EgressProxy(proxy, get_run_budget()).__enter__()
                 proxy = self.egress_proxy.browser_config()
+            browser_proxy=proxy or ({'server':ordinary_domain} if ordinary_domain else None)
             native_domain = (self.source == 'domain' and not proxy
                              and os.getenv('DOMAIN_NATIVE_NETWORK', '').lower() == 'true')
             engine = os.getenv(f'{self.source.upper()}_BROWSER_ENGINE', os.getenv('BROWSER_ENGINE', 'chromium')).strip().lower()
@@ -174,20 +184,20 @@ class BrowserManager:
                 extra['executable_path'] = executable
             elif engine in {'chromium', 'patchright'} and os.getenv('CHROMIUM_CHANNEL'):
                 extra['channel'] = os.environ['CHROMIUM_CHANNEL']
-            if proxy:
-                extra['proxy'] = proxy
+            if browser_proxy:
+                extra['proxy'] = browser_proxy
             
             if engine == 'camoufox':
                 from camoufox.sync_api import Camoufox
-                if proxy and os.getenv('CAMOUFOX_ASSET_PREFLIGHT','').lower()=='true':
+                if browser_proxy and os.getenv('CAMOUFOX_ASSET_PREFLIGHT','').lower()=='true':
                     from camoufox import geolocation
                     from .geoip_asset import ensure_geoip_asset
-                    asset=ensure_geoip_asset(geolocation,ip=self.geoip_address)
+                    asset=ensure_geoip_asset(geolocation,ip=self.geoip_address or ordinary_ip)
                     logger.info('GeoIP asset preflight: %s',asset['status'])
                 camoufox_options = dict(
                     persistent_context=True, user_data_dir=profile_path,
-                    headless=use_headless, proxy=proxy,
-                    geoip=(self.geoip_address or True) if proxy else False, enable_cache=True,
+                    headless=use_headless, proxy=browser_proxy,
+                    geoip=(self.geoip_address or ordinary_ip or True) if browser_proxy else False, enable_cache=True,
                     locale='en-AU', service_workers='allow' if native_domain else 'block')
                 preset_prefix = self.source.upper() + '_CAMOUFOX_'
                 if os.getenv(preset_prefix + 'NO_UBO', '').lower() == 'true':
@@ -349,8 +359,9 @@ class BrowserManager:
                 page = self.get_driver()
                 self._navigation_status = None
                 target = urlsplit(url)
-                if (self.source == 'domain' and os.getenv('DOMAIN_SEARCH_TRANSPORT') == 'json'
-                        and target.path.startswith('/rent/')):
+                if (self.source == 'domain' and
+                        ((os.getenv('DOMAIN_SEARCH_TRANSPORT')=='json' and target.path.startswith('/rent/')) or
+                         (os.getenv('DOMAIN_DETAIL_TRANSPORT')=='json' and re.search(r'-\d+/?$',target.path)))):
                     return self._fetch_domain_search(url)
                 # RealEstate.com.au 等站点可能持续加载资源导致 "load" 事件迟迟不触发，
                 # 使用 domcontentloaded 可显著降低 page.goto 超时概率。
