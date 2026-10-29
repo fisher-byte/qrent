@@ -13,7 +13,7 @@ export SCRAPER_ENV_FILE="$qrent_release/.env"
 # market coverage. Models, commute calls and production publishing are separate.
 timeout --kill-after=30s 3h xvfb-run -a .venv/bin/python -u recovery_runner.py \
     --school-scope --cities sydney --scrapers domain realestate \
-    --pages 7 --limit 2000 --no-details --retries 1 \
+    --pages 7 --limit 2000 --detail-limit 100 --details-per-area 10 --retries 1 \
     --max-requests 40000 --proxy-bytes 150000000 --db "$qrent_root/properties.db" \
     --output "$qrent_root/output/school-daily-$(date +%Y%m%d)" "$@" \
     2>&1 | tee -a "$qrent_root/logs/school-$(date +%Y%m%d).log"
