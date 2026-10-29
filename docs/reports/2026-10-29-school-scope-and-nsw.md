@@ -121,3 +121,5 @@ Google Cloud 的每日额度按太平洋时间午夜重置，因此在北京时�
 **官网没有因此批量发布。** 15:14 用原根 `.env` 对悉尼 MySQL 再做只读事务核对：房源 3,115、用户 54、学校代码 7，最新 `published_at` 仍是 2026-10-28 08:31:24；本轮生产写入 0。批量 AI 评分、中英文关键词和生产发布仍未完成；模型是否也必须完全免费，已向用户澄清，在收到回复前不新增付费模型请求。
 
 私有证据：`latest-cache-readonly.json`、`google-free-280/result.json`、`remaining-free-queue/{schedule-receipt,batch-a/result}.json`、本机 `mysql-readonly-final.json`。部署、采集窗口、路线缓存、模型字段、数据库和网页分别验收，不将这批真实通勤当成官网整库已经更新。
+
+收尾将本轮三份 `pre-source-20261029_{132932_293274,134002_009468,142506_680820}` 目录内的 **爬虫 SQLite 备份**由 `properties.db` 无损压缩为 `properties.db.gz`；每份通过 SQLite quick_check 和完整解压 SHA256 比对，内容可恢复，源码回滚文件保留。合计原始 1,003,819,008 bytes、压缩后 221,904,543 bytes；连接关闭后可用磁盘约 1.40GB。对应目录的 `compressed-backup-receipt.json` 保存原始哈希和大小。没有压缩、更换或清理正式补充账本，也没有删除失败/不确定调用。
