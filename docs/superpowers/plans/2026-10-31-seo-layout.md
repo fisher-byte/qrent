@@ -23,8 +23,10 @@ The #302 guide migration remains deferred, never reported as deployed.
       run the Impeccable detector once. No class-mirroring tests.
 - [x] Batch real desktop/mobile visual and interaction checks, fix material
       findings once, and perform one final confirmation.
-- [ ] Review the final source, submit/attach the original PR and verify CI,
+- [x] Review the final source, submit/attach the original PR and verify CI,
       original frontend production deployment and served pages.
+
+Production acceptance: `docs/reports/2026-10-31-seo-layout.md`.
 
 ## Candidate evidence
 
