@@ -4,7 +4,7 @@
 
 ## 已确定的边界
 
-- **2026-10-30 充值后已通过专用 Flash 小样本，受控补充已恢复。** 原异常 Key 已永久删除，原共享 OCR Key 已禁用；新 Key 仅在爬虫机私有环境，限制服务器 IPv4 和固定模型 `qwen3.7-flash-2026-07-15`，云端 CNY 50/月且达额停止。三条评分与双语关键词通过，零请求复验及一次中文修复均有回执；后续只处理新冻结的 pending 输入。每日模型是否允许调用由 `ops/daily_enrich.py` 的 Key SHA/固定模型/原暂停记录检查决定，模型暂停仍允许免费通勤与缓存发布。
+- **2026-10-30 10:26 起模型因用户费用问询人工临停，免费通勤和缓存发布可继续。** 新专用 Key 的云端预算仍为 CNY 50/月、达额停止；当前余额与费用已通过云端页面核对，私有财务证据在 `output/billing-investigation-20261030/`，不推 Git。不得把本次 `Manual pause: investigate exhausted Aliyun account balance` 保护标记当作供应商欠费证据；后续恢复只处理这次人工暂停，不删除旧失败／不确定请求或其他暂停记录。原异常 Key 已永久删除，原共享 OCR Key 已禁用；新 Key 仅在爬虫机私有环境，限制服务器 IPv4 和固定模型 `qwen3.7-flash-2026-07-15`。每日模型是否允许调用由 `ops/daily_enrich.py` 的 Key SHA/固定模型/暂停记录检查决定。
 - 只推送 `fisher-byte/qrent` 的恢复分支；不推送原 `wiperi/qrent`。fork 的 GitHub Actions 已停用，部署使用本机检查和 SSH。
 - 用户已确认保留其他项目与测试 Key；本项目仅使用 Qrent 专用 Key，不批量禁用其他 Key。CNY 50/月的云端限制只覆盖 Qrent 专用 Key，不是整个阿里云账号的总限额。
 - 用户最新授权：模型费用独立计算，每月最多 **CNY 50**，按人民币原生计价预留/结算；非模型新增 API/代理费用继续最多 **USD 4/月**，通勤新增现金 **USD 0**。代理累计采购最多 **USD 1.50**；两张已付发票各 USD 0.30，合计 **USD 0.60 / 2GB**。已接入既有 Distancematrix.ai Accurate 赠金，只在 NSW 无成功结果后显式补缺；赠金跨 Key、跨月累计最多 USD 40，请求前预留，无现金回退，不自动购买。墨尔本继续暂缓。
@@ -39,7 +39,7 @@
 - 主采集目录源码 `24e1c51` 已经 **284 项**本机/服务器离线检查部署；正在执行补充的独立 worker 固定 `2196667`、275 项检查，不能在运行中覆盖。固定 Flash 使用文本内容的多模态接口，关闭思考和搜索、最多输出 150 tokens，拒绝超过 32K 的保守输入上界。正式请求首次拒绝或不确定即暂停整批，退出码 3 阻止下一批；暂停标记跨进程、提示词和模型生效，不删除失败记录。审查/发布两类 API 上限均为 0。
 - 模型不完整输出只补缺：保留有效评分组，单独缓存一次缺失组请求；中文重试仍不合格时，仅翻译已验收的英文关键词，不重新调用全部评分。5 条真实 held 样本均补齐，恰好新增 5 个请求；随后同输入 0 请求复验通过。未通过的仍隔离，不填默认值。
 - 更换模型时复用同描述、提示词、评分参数下已完整验收的旧模型缓存，记录实际 `ai_model` 来源，不伪称为新模型结果。历史核对 2,637 个地址中有 95 个完整旧评分可复用；这不是当前调用数或发布总量。动态数量以正式账本及当前队列回执为准。
-- 旧首次队列及 `pending-worker` 的断点全部保留。原 `qrent-sydney-bootstrap-20261030.service` 第一段处理 500 个地址，发布/更新 474 个、隔离 26 个，确认子进程自然退出后停用。现用 **`qrent-sydney-bootstrap-v2-20261030.service`**、`output/sydney-daily-recovery-20261030/pending-reviewed-worker/job.json`：2,637 个地址排除原 94 和本轮 474 个已有发布回执，冻结继续处理 **2,069 个地址**。读取实际 batch receipt、结果和账本，不凭启动状态宣称完成；`bootstrap-first-pass.json` 只在本轮第一遍真实处理结束后写入，held 仍单独保留。
+- 旧首次队列及 `pending-worker` 的断点全部保留。原 `qrent-sydney-bootstrap-20261030.service` 第一段处理 500 个地址，发布/更新 474 个、隔离 26 个，确认子进程自然退出后停用。V2 已在北京时间 10:11 真实结束：2,069 个地址发布／更新 2,017、隔离 52，共 42 批；原 2,637 地址范围累计有 2,585 个发布回执。`bootstrap-first-pass.json` 已写入，原 worker 与恢复服务均已自然退出；不把这个范围等同于全站旧库存全部核验。
 - 每日 02:00 原采集入口已接 `qrent-school-enrichment.service`：`ops/prepare_school_enrichment.py` 只按当前采集真实 school_cohorts 准备去重输入，`ops/enrichment_queue.py --nsw-free` 仅允许免费 NSW 补缺，再做受控模型和完整记录发布。服务先等待首次补充的 `enrichment/bootstrap-first-pass.json`；当前格式的首次整条每日运行还未验收。不要用历史兼容测试副本冒充新全量。
 - 新日常采集保持原区域和 7 页窗口，额外仅抓缺失详情（每轮最多 100 条、每区最多 10 条），复用已有详情，不调用模型。初次 Domain 缺描述回填仅针对当前真实 school_cohorts、无合并冲突且其他输入字段有效的去重地址，不重复扫列表，不使用住宅代理；私有逐批回执保留成功及失败。
 - Domain 详情使用原生浏览器的公开 JSON、普通香港 SOCKS `127.0.0.1:18082`，私有配置 `DOMAIN_DETAIL_TRANSPORT=json`、`DOMAIN_NATIVE_NETWORK=true`、`DOMAIN_BROWSER_PROXY` 与已核实 `DOMAIN_PROXY_IP`；拒绝混用住宅代理，解析前必须匹配 listing ID。此前 HTML 补缺 200 个候选中的 41 条成功、19 条 403、140 条未处理；新 JSON 路径复用已收到的 3 条响应，再补剩余缺描述，保留旧回执。独立任务沿用 `xvfb-run`。新 JSON 回填实际再请求 156 条、取得 155 条；最后 1 条首页超时经单独受控请求已补回，200 个候选现全部有真实描述。原成功/超时回执保留，住宅/模型/地图/生产写入均为 0。每日服务已在回填结束后启动，先等真实首次补充标记；实际补缺结果见报告和 `domain-json-details-xvfb/result.json`。
@@ -59,8 +59,9 @@
 - [悉尼每日恢复、实际覆盖与预算验收](docs/reports/2026-10-30-sydney-daily.md)
 - 私有输出中的 `deployments/*/server-receipt.json`、`enrichment-server-stage-20261029` 和 `enrichment-validation-20261029`。不要将私有备份、账本、页面原文或 `.env` 推送。
 
-首次补充开机恢复使用已启用的 `qrent-sydney-bootstrap-resume.service`，只在原冻结 job 存在且 `bootstrap-first-pass.json` 不存在时执行同一 supervisor。当前原 V2 队列继续运行，不同时启动第二个恢复进程。
+首次补充开机恢复使用已启用的 `qrent-sydney-bootstrap-resume.service`，只在原冻结 job 存在且 `bootstrap-first-pass.json` 不存在时执行同一 supervisor。当前完成标记已存在，不再次启动首次队列。
 
 - 多组补缺仍只返回一组时，保留已得到的有效组，其余按 `score-single-fill-v2` 单组缓存槽补齐；先检查原响应恰好一项再校验范围，非法/多项仍隔离。主目录已有此修复，当前首次 worker 保持旧源码，实际 held 复验等待后续每日队列。
 - 官网首页三校已实测显示 10 月 29 日批次，Waterloo 样本到 UNSW/USYD/UTS 为 20/41/32 分钟，数据库/API/页面一致；不等于旧库存全部核验。`PropertyCard.tsx` 对空入住日期隐藏标签，不补当天日期迎合页面。
 - 正式账本每日 03:05 只读一致快照到 `backup/enrichment-state/`、保留 30 天，已验证旧失败/不确定调用与费用事件保留。目录内通用 `properties_日期.db.gz` 文件实际是 enrichment 账本；仅供恢复，不得当成另一个正式账本启动任务，不自动换回旧快照。
+- 当日每日服务曾因冻结 job 早于主目录新部署而报 `Source changed; queue requires review`，与余额无关。已确认旧 job 尚无 queue/API 阶段、原输入 SHA 不变，完整归档到同名 `-before-source-review-20261030_105913` 目录；当前部署全部源码 SHA 相符后重新准备当天输入，2,772 个有效地址、4,131 个学校关联。10:59 仅重启模型关闭的免费／缓存路径，是否完成仍以新的 `daily-receipt.json` 为准；不从空账本重跑。
