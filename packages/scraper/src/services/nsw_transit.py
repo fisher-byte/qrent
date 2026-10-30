@@ -14,12 +14,13 @@ class NSWTransitError(RuntimeError):
 
 
 def street_key(value):
-    # TfNSW's address index uses these observed Australian abbreviations.
+    # Provider address indexes use these observed Australian abbreviations.
     # This compares provider evidence; it never changes property/cache identity.
     value = normalized_address(value)
     parts = value.split()
     if parts:
-        parts[-1] = {'tce':'terrace','cr':'crescent','qy':'quay'}.get(parts[-1],parts[-1])
+        parts[-1] = {'tce':'terrace','cr':'crescent','qy':'quay','cl':'close','cct':'circuit',
+                     'bvd':'boulevard','blvd':'boulevard','al':'alley','ally':'alley'}.get(parts[-1],parts[-1])
     return ' '.join(parts)
 
 

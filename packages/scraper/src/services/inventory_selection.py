@@ -17,7 +17,14 @@ def address_key(prop):
         return None  # An advertised floor/bed count is not an apartment number.
     if not re.match(r'^(?:(?:unit|apartment|apt|flat)\s+)?(?:[\w-]+/)?\d[\w-]*\s+.+$', address):
         return None
-    return address, suburb_key(region.name), region.state, str(region.postcode)
+    suburb = suburb_key(region.name)
+    # Reviewed TfNSW evidence places these two source labels at the same
+    # exact unit/building. Keep raw source fields and permanent cache keys;
+    # this exception must not generalize to other units or postcodes.
+    if (address, suburb, region.state, str(region.postcode)) == (
+            '305/1 treacy street', 'hurstville grove', 'NSW', '2220'):
+        suburb = 'hurstville'
+    return address, suburb, region.state, str(region.postcode)
 
 
 def select_inventory(properties, school_targets=None, *, published_priority=None):

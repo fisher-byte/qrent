@@ -3,8 +3,7 @@ import math
 import re
 import hashlib
 
-from .address_identity import normalized_address
-from .nsw_transit import building_address
+from .nsw_transit import building_address, street_key
 
 
 class DistanceTransitError(RuntimeError):
@@ -15,7 +14,7 @@ def origin_matches(prop, returned):
     if not isinstance(returned,str):
         return False
     def street(value):
-        return normalized_address(re.sub(r'(?<=\d)\s*-\s*(?=\d)','-',value))
+        return street_key(re.sub(r'(?<=\d)\s*-\s*(?=\d)','-',value))
     expected=street(building_address(prop.address_line1))
     actual=street(building_address(returned.split(',',1)[0]))
     postcode=re.search(r'\bNSW\s+(\d{4})\b',prop.address_line2.replace('-',' '),re.I)
@@ -85,7 +84,7 @@ class DistanceTransit:
             if (evidence and evidence.get('request_id')==previous.get('request_id') and
                     evidence.get('destination')==destination and evidence.get('mode')=='transit'):
                 minutes=validate_response(prop,destination,evidence['data'])
-                self.state.put(attempt,{**previous,'reviewed_validation':'20261030-v2','reviewed_minutes':minutes})
+                self.state.put(attempt,{**previous,'reviewed_validation':'20261030-v3-street-types','reviewed_minutes':minutes})
                 return minutes  # Keep the original call status and fee; no second HTTP.
             raise DistanceTransitError('DISTANCE_PREVIOUS_ATTEMPT_REQUIRES_REVIEW')
         origin=building_address(prop.address_line1)+', '+prop.address_line2.replace('-',' ')+', Australia'

@@ -74,6 +74,42 @@ class SchoolScopeTests(unittest.TestCase):
         self.assertIn('price_conflict',group['review'])
         self.assertIn('multiple_ids_in_one_source',group['review'])
 
+    def test_verified_full_address_locality_alias_preserves_identity_and_school_union(self):
+        a=prop(first='305/1 Treacy Street',area='hurstville-nsw-2220',description_en='Domain description')
+        b=prop(source='realestate',ident='900',first='305/1 Treacy St',
+               area='hurstville-grove-nsw-2220',description_en='REA description')
+        targets={('domain','123'):['USYD'],('realestate','900'):['UTS']}
+        result=select_inventory([a,b],targets,published_priority={('realestate','900'):71})
+        self.assertEqual(len(result['groups']),1)
+        group=result['groups'][0]
+        self.assertEqual(group['primary'],b)
+        self.assertEqual(group['schools'],['USYD','UTS'])
+        self.assertEqual(group['review'],[])
+        self.assertEqual(len(group['members']),2)
+        self.assertEqual(b.address_line2,'hurstville-grove-nsw-2220')
+        self.assertEqual(a.house_id,'123');self.assertEqual(b.house_id,'900')
+
+    def test_verified_locality_alias_does_not_generalize_to_other_units_or_buildings(self):
+        for first,area in [('306/1 Treacy Street','hurstville-grove-nsw-2220'),
+                           ('305/3 Treacy Street','hurstville-grove-nsw-2220'),
+                           ('305/1 Treacy Street','hurstville-grove-nsw-2218')]:
+            with self.subTest(first=first,area=area):
+                a=prop(first='305/1 Treacy Street',area='hurstville-nsw-2220')
+                b=prop(source='realestate',ident='900',first=first,area=area)
+                targets={('domain','123'):['USYD'],('realestate','900'):['UTS']}
+                self.assertEqual(len(select_inventory([a,b],targets)['groups']),2)
+        a=prop(first='306/1 Treacy Street',area='hurstville-nsw-2220')
+        b=prop(source='realestate',ident='900',first='306/1 Treacy Street',area='hurstville-grove-nsw-2220')
+        self.assertEqual(len(select_inventory([a,b],{('domain','123'):['USYD'],('realestate','900'):['UTS']})['groups']),2)
+
+    def test_verified_locality_alias_still_holds_current_price_conflicts(self):
+        a=prop(first='305/1 Treacy Street',area='hurstville-nsw-2220')
+        b=prop(source='realestate',ident='900',first='305/1 Treacy Street',area='hurstville-grove-nsw-2220')
+        b.price_per_week=700
+        result=select_inventory([a,b],{('domain','123'):['USYD'],('realestate','900'):['UTS']})
+        self.assertEqual(len(result['groups']),1)
+        self.assertIn('price_conflict',result['groups'][0]['review'])
+
     def test_daily_selection_preserves_an_already_published_source_identity_after_domain_details_arrive(self):
         a=prop(description_en='Newly filled Domain description')
         b=prop(source='realestate',ident='900',description_en='Previously published REA description')

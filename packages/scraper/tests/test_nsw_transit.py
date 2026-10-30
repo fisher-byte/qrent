@@ -84,7 +84,10 @@ class NSWTransitTests(unittest.TestCase):
 
     def test_provider_street_abbreviations_and_number_case_do_not_change_the_address(self):
         for expected,actual in [('Magdalene Terrace','Magdalene Tce'),
-                                ('Brittain Crescent','Brittain Cr'),('Watermans Quay','Watermans Qy')]:
+                                ('Brittain Crescent','Brittain Cr'),('Watermans Quay','Watermans Qy'),
+                                ('George Close','George Cl'),('George Circuit','George Cct'),
+                                ('George Boulevard','George Bvd'),('George Boulevard','George Blvd'),
+                                ('George Alley','George Al'),('George Alley','George Ally')]:
             with self.subTest(expected=expected):
                 self.http.get.return_value=MagicMock(status_code=200)
                 self.http.get.return_value.json.return_value={'locations':[{
@@ -92,6 +95,20 @@ class NSWTransitTests(unittest.TestCase):
                     'buildingNumber':'11A','streetName':actual,'postCode':'2205'}]}
                 self.assertEqual(self.client.resolve('11a '+expected+', Wolli Creek NSW 2205',origin=True),
                                  '151.153213:-33.929812:EPSG:4326')
+
+    def test_street_type_alias_is_not_applied_to_street_names_or_wrong_buildings(self):
+        self.http.get.return_value=MagicMock(status_code=200)
+        for expected,street,number,postcode in [
+                ('18 Al Street','Alley Street','18','2016'),
+                ('18 George Close','George Cl','20','2016'),
+                ('18 George Close','George Cl','18-20','2016'),
+                ('18 George Close','George Cl','18','2017')]:
+            with self.subTest(expected=expected,street=street,number=number,postcode=postcode):
+                self.http.get.return_value.json.return_value={'locations':[{
+                    'isBest':True,'type':'singlehouse','coord':[-33.910683,151.223324],
+                    'buildingNumber':number,'streetName':street,'postCode':postcode}]}
+                with self.assertRaises(NSWTransitError):
+                    self.client.resolve(expected+', Redfern NSW 2016, Australia',origin=True)
 
     def test_nsw_unresolved_pair_is_held_across_runs_for_review(self):
         prop=PropertyData(source=PropertySource.DOMAIN,house_id='123',address_line1='1 Example Street',

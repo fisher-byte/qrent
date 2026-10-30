@@ -119,6 +119,55 @@ class DistanceTransitTests(unittest.TestCase):
             self.assertIsNone(self.pool.calculate(self.prop,'UNSW'))
         self.assertTrue(any('ORIGIN_NOT_EXACT' in str(x) for x in self.pool.errors))
 
+    def test_observed_street_type_aliases_match_the_same_building(self):
+        from src.services.distance_transit import origin_matches
+        for expected,actual in [('Close','Cl'),('Circuit','Cct'),('Boulevard','Bvd'),
+                                ('Boulevard','Blvd'),('Alley','Al'),('Alley','Ally')]:
+            with self.subTest(expected=expected,actual=actual):
+                prop=copy.copy(self.prop);prop.address_line1='2/18 George '+expected
+                self.assertTrue(origin_matches(prop,'18 George '+actual+', Redfern NSW 2016, Australia'))
+
+    def test_street_aliases_do_not_relax_number_range_name_or_postcode(self):
+        from src.services.distance_transit import origin_matches
+        prop=copy.copy(self.prop);prop.address_line1='2/18 George Close'
+        for returned in ['20 George Cl, Redfern NSW 2016, Australia',
+                         '18-20 George Cl, Redfern NSW 2016, Australia',
+                         '18B George Cl, Redfern NSW 2016, Australia',
+                         '18 George Cl, Redfern NSW 2017, Australia',
+                         '18 George Cl, Redfern VIC 2016, Australia',
+                         'George Cl, Redfern NSW 2016, Australia',
+                         '18 George Court, Redfern NSW 2016, Australia']:
+            with self.subTest(returned=returned):self.assertFalse(origin_matches(prop,returned))
+        prop.address_line1='2/18 Al Street'
+        self.assertFalse(origin_matches(prop,'18 Alley Street, Redfern NSW 2016, Australia'))
+
+    def test_reviewed_street_type_response_reuses_original_credit_without_http(self):
+        self.prop.address_line1='2/18 George Close'
+        self.payload['origin_addresses']=['18 George Cl, Redfern NSW 2016, Australia']
+        pair=EnrichmentState.key('transit-permanent-v1','2/18 george close','redfern nsw 2016',
+                                'UNSW','weekday-08:30')
+        request_id=self.state.reserve_credit('distancematrix','distancematrix-growth-account',10,.002)
+        self.state.finish(request_id,'DISTANCE_ORIGIN_NOT_EXACT')
+        self.state.put(self.state.key('distancematrix-pair-attempt-v1',pair),
+                       {'request_id':request_id,'status':'reserved'})
+        self.state.put(self.state.key('distancematrix-response-v1',pair),{'request_id':request_id,
+            'destination':'University of New South Wales, Kensington NSW 2052, Australia',
+            'mode':'transit','data':self.payload})
+        with patch.object(self.pool.http,'get',side_effect=AssertionError('No repeat request')):
+            self.assertEqual(self.pool.calculate(self.prop,'UNSW'),23)
+        self.assertEqual(self.state.db.execute('SELECT status FROM calls').fetchall(),
+                         [('DISTANCE_ORIGIN_NOT_EXACT',)])
+        self.assertAlmostEqual(self.state.credit_budget_summary()['spent_or_reserved_usd'],.002)
+
+    def test_old_abbreviated_street_permanent_cache_identity_is_unchanged(self):
+        self.prop.address_line1='2/18 George Cl'
+        pair=EnrichmentState.key('transit-permanent-v1','2/18 george cl','redfern nsw 2016',
+                                'UNSW','weekday-08:30')
+        self.state.put(pair,{'minutes':23,'mode':'transit','provider':'distancematrix'})
+        with patch.object(self.pool.http,'get',side_effect=AssertionError('Old key must remain usable')):
+            self.assertEqual(self.pool.calculate(self.prop,'UNSW'),23)
+        self.assertEqual(self.state.db.execute('SELECT COUNT(*) FROM calls').fetchone()[0],0)
+
     def test_street_center_or_wrong_postcode_cannot_substitute_for_an_address(self):
         payload=copy.deepcopy(self.payload)
         payload['origin_addresses']=['George Street, Sydney NSW 2000, Australia']
