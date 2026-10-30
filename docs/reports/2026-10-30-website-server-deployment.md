@@ -1,47 +1,43 @@
-# 官网服务器更新路径
+# 官网后端已通过原 GitHub CI/CD 发布
 
-用户要求沿用服务器和私有环境配置更新，不通过个人 Vercel 账号重新部署官网。
+北京时间 2026-10-30 23:17，原仓库 main 的 `fd80294a1704464c24809397f9ba3ebb344d8ec9` 已实际部署。生产回执为 `deployed`，数据库、Redis 容器和挂载、原环境及 Compose 均通过保护检查。
 
-## 已核对
+- [最终生产 CI/CD](https://github.com/wiperi/qrent/actions/runs/41078669754)
+- [最终挂载保护修复 PR #300](https://github.com/wiperi/qrent/pull/300)
+- [容量恢复与 CI 镜像发布 PR #298](https://github.com/wiperi/qrent/pull/298)、[包缓存保护 PR #299](https://github.com/wiperi/qrent/pull/299)
 
-- `CLAUDE.md` 是历史架构说明。仓库没有 `cloud.md`；原 `.github/workflows/cd.yml` 使用 `DEPLOY_SERVER_HOST`、`DEPLOY_SERVER_USERNAME`、`DEPLOY_SERVER_PASSWORD`，经 SSH/SCP 更新服务器 `~/qrent`，Docker Compose 管理 backend、MySQL、Redis。
-- 2026-10-30 从本机及爬虫机读取的实际响应：`www.qrent.rent` 是 Next.js/Vercel，`api.qrent.rent` 是 Cloudflare 后的 Express。这不妨碍通过悉尼服务器更新 API，使现有网页获得正确排序，无需取得前端部署账号。
-- 数据库连接 `139.180.164.78` 正常，受限写入已能自动更新原表。数据库登录成功不等于已经取得该机器的 SSH 登录。
+## 实际验收
 
-## 本次改动
+23:19–23:20 再次只读逐项检查 2,696 个完整地址及 4,022 条必要学校关联：Domain 1,535、Real Estate 1,161；MySQL 字段差异 0、公开 API 的 70 页差异 0。检查包括报价、地址、房型、入住日期、关键词、双语描述、平均分、来源 URL、图片和通勤。8 项评分与双语关键词的完整性在正式缓存/冻结输入验收，原 SQL/API 只提供其既有投影，不伪称 API 返回完整评分数组。
 
-旧搜索网页每页请求 12 条、仅按评分降序，导致保留的旧高分房源占据前排。后端识别这一请求形状，改为先按原 `publishedAt` 降序、再按评分降序；过滤、分页、语言及其他显式排序保持。相同形状的其他客户端也会获得该默认排序。首页已有日期优先排序。
+公开 API 的 UNSW、USYD、UTS 及 UNSW/Eastgardens 四个旧网页请求，均与显式日期/评分排序的最新结果边界一致。浏览器实际打开原官网，Eastgardens 为 76 条、UNSW 总数 2,244；首行三卡为 320/15 Oscar Place、G37/1 Finch Drive、1010/128 Banks Ave，周租 1,250/1,500/1,770，评分 17.5/17.5/17.4，通勤 33/32/35 分钟，页面日期均为 10 月 30 日，图片和关键词已实际显示。各校 API 总数包含原库存，学校间也有重叠，不能相加当独立房源数。
 
-本次不把 `publishedAt` 当成最近核验时间，不改旧行日期、不删除旧库存。原表没有 `last_seen` / 活跃状态字段，因此日期优先也不等于所有旧库存已经重新核验。
+数据库前后只读快照核对 12 张表结构一致，原 54 个用户及收藏关系保持，验收没有生产 DML。正式账本仍在原爬虫机，没有改表、换主键、清缓存或重跑已成功模型/地址—学校请求。本次发布和验收新增提供商请求、购买、充值均为 0。
 
-原 backend 启动脚本每次执行 `prisma db push --accept-data-loss`。现已移除：启动只运行后端；Prisma Client 在镜像构建时生成，使用占位 URL、不连接数据库。pnpm 固定为已在本机使用的 10.19.0。
+## 这次解决的问题
 
-## 验证和部署边界
+旧网页每页 12 条、仅按评分降序，导致原有旧高分记录挡住新数据。后端只兼容这一请求形状，先按原 `publishedAt`、再按评分降序；其他显式排序保持。移除了启动时的 `prisma db push --accept-data-loss`，Prisma Client 在镜像构建时生成，不连接数据库。
 
-- 真实 tRPC caller 的 6 项排序、过滤和本地化回归通过，PropertyService 被替换，不访问数据库或邮件。
-- 启动测试先在原脚本观察到 `db push` 而失败；修复后实际执行 shell，仅捕获后端启动命令。共 7 项回归及 backend TypeScript 构建通过；独立审查未发现阻塞问题。
-- Docker 镜像验证停在 Docker Hub 认证端点网络超时，尚未完成镜像内验证。构建上下文只含公开源码和依赖清单，没有复制私有环境文件。
-- 已将私有根 `.env` 的 `DEPLOY_SERVER_HOST` 配置为用户给定 IP；`DEPLOY_SERVER_USERNAME` / `DEPLOY_SERVER_PASSWORD` 仍为空；现有爬虫 SSH 密钥及已提供数据库密码未通过悉尼 root SSH。已请求补充有效 SSH 用户名/密码、密钥路径或现有部署配置位置；不继续猜测密码，不新增服务器凭据。
-- 因此本次后端排序/启动改动**尚未部署原官网 API**。数据补齐和原表写入继续正常，不能用数据发布回执声称后端代码已部署。
+原发布机只有约 1GB 内存，系统盘可用约 123MB，96MB 的 `/run` 也耗尽空间/inode。通过已审查的 GitHub 维护流程清理非挂载、无进程引用的命名下载缓存，并临时提高 `/run` 上限至 192MB/262,144 inode，保留原安全挂载选项与全部运行内容。维护回执核实系统可用空间升至 3,074,727,936 bytes，runtime 恢复 101,101,568 bytes、139,812 inode，既有容器及环境保持。不删日志、镜像、卷、运行文件，不重启 Docker、MySQL、Redis或其他业务。
 
-取得 SSH 后先只读确认实际工作目录、容器、镜像和环境，再备份代码/部署定义及原库，替换 backend 服务并核对 `/echo`、原搜索 API 和实际页面。保留数据库/Redis 容器、卷、JWT 和其他原环境配置；不执行原 CD 的 `compose down`、全机 prune 或 schema push。fork Actions 仍停用，继续使用本机检查和 SSH。
+镜像改在 GitHub runner 构建，服务器只接收、核验 SHA-256 和加载。实测镜像约 540MB、压缩包约 215MB；空间闸使用压缩包 + 两倍镜像大小 + 512MiB，并至少保留 2GiB。失败或中断时清理本次大上传文件；仅替换 backend，保留上一镜像和原查询回退验收。
 
+首次新后端曾通过真实查询后误回退，原因是 Docker 对相同 MySQL 挂载返回不同数组顺序。已先复现再修复：完整条目排序后比较，真实字段变化仍触发回退；不通过忽略字段放宽保护。回退在弱机器上保留更充分启动时间，仍须通过真实数据库查询。最终 CI 的 7 项后端、10 项部署、15 项容量、9 项传输、4 项接收和 6 项接口验收均通过，独立审查无待处理 Critical/Important。
 
-## 20:06 用户确认后的部署路径更正
+## 长期操作方式
 
-用户明确：长期沿用“GitHub 合并后 CI/CD 发布后端/依赖/Docker；数据库由 Agent 独立账号操作；爬虫在 yibin 的机器写库”。GitHub 已只读核实 `production` 环境有 18 项 Secrets，包括部署主机、用户名和密码，当前账号有原仓库写权限。后端发布不依赖本地 `.env` 的部署字段，也不需要导出 Secrets 或索取密码。
+后端、Docker、依赖经原 GitHub PR 合并后，由原 CI/CD 使用 `production`/`staging` 既有 Secrets 发布。部署密码不取回本机或 fork，不因本地部署字段为空再索取密码。不要使用原有 destructive down/prune 或启动 schema push。
 
-先前本地 SSH 阻塞结论只适用于手工 SSH，不适用于既有 CI/CD。新复核确认本地 `DB_ROOT_PASSWORD` 已被读取并提交，但服务器拒绝 root 认证；部署身份必须交由原环境中的三项 Secrets 使用。
+私有 `.deploy/` 保留 backend 镜像覆盖、前一镜像和回执；沿用同一 Compose 项目。可从 GitHub 手动运行 `Backend host inspection` 只读巡检，`Backend capacity recovery` 默认仅 plan，维护前检查实际候选及镜像所需空间。
 
-新的小范围发布分支从当前原 `main` 的 `9850e68` 准备：后端排序/安全启动、CI 成功后调用 CD、只更新 backend、保留原 `.env`/MySQL/Redis/卷、校验失败回退旧镜像。用户已明确按这个流程继续；原广泛爬虫恢复分支不整体合入。实际部署仍须取得 PR 检查、生产 CD 和公开 API/页面验证，不能用准备成功替代。
+后端与 MySQL 在部署机；爬虫在独立 yibin 机，以受限数据库身份自动发布。爬虫机和香港出口沿用长期 SSH，不依赖人反复登录腾讯云。23:26 复核 crond、Maps 普通出口及 MySQL 出口均 active/enabled，原每日 02:00 原区域采集后接受控补齐/发布；下一次 10 月 31 日周期尚未发生，不预称未来轮次成功。
 
+## 保留的边界
 
-## CI 验收与剩余审批
+当前有效选择 2,771 个地址中，2,696 完整、75 个缺少可核实路线而隔离；另有原始地址隐藏、冲突和输入不合格记录未进入这批选择，详见每日报告。墨尔本继续暂缓。
 
-最小发布 PR 为 https://github.com/wiperi/qrent/pull/293 ，head `fd1237cb39b257a910440339dd137d83d1de1fca`。原仓库 CI https://github.com/wiperi/qrent/actions/runs/41054391656 已完成成功：代码格式、前后端构建/类型检查、7 项后端回归、8 项可执行发布回归、6 项健康验收，以及真实后端 Docker 构建和无网络 Prisma Client 检查全部通过。PR 事件的部署 job 按设计跳过，只有原 main/staging 的 push 且 CI 成功后才调用生产/预发布 CD。
+旧库存没有被删除或全部重新核验。网页原“发布于”使用原库 `publishedAt` 的历史采集时间语义；日期优先不等于每条源站房源首次上架日期，也不证明所有旧库存仍在出租。原前端继续沿原部署，fork 内的空入住日期标签与其他前端补丁不能当作已发布；此次上线的是后端兼容层。
 
-独立审查发现的两处 Important 均已先复现后修复：旧镜像回退还需通过真实数据库房源查询；新页须与显式日期/评分查询的结果边界对齐，允许两种排序键完全相同的并列。不能只凭 /echo 或页内有序宣称恢复。
+模型专用 Key 与程序上限 CNY 50/月；其他新增 API/代理现金 USD 4/月，通勤新增现金 0、赠金跨月最多 USD 40。正式账本保持模型 CNY 12.602919（含历史保守预留，不是供应商最终扣费），此前代理发票 USD 0.60、赠金预留 USD 0.56；本次发布增量为 0。用户保留的其他项目/测试 Key 不属于本项目专用上限。
 
-已按用户最新授权尝试正常 squash 合并，GitHub 返回 base branch policy prohibits the merge。PR 状态 REVIEW_REQUIRED，当前 fisher-byte 是作者、非管理员，仓库 auto-merge=false；需原维护者完成 GitHub 审批/合并。已向用户提交具体 PR，不再索取服务器密码、不绕过分支保护。Vercel 的外部 PR 状态不属于 required checks；必需项 ci-success 已通过，实际剩余合并阻塞是 Review。
-
-尚未合并、尚未执行生产 CD；官网原排序行为仍需上线后验收。数据写入与爬虫原每日链路继续独立运行。
+私有截图、前后数据库快照、调用统计和已脱敏 CI 日志保存在本机 `packages/scraper/output/sydney-daily-recovery-20261030/`；新完整核对在爬虫机同目录 `post-ci-publication-check/`。环境、原始数据库、账本及备份不推送 Git。

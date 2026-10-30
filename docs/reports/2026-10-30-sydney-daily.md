@@ -57,9 +57,9 @@
 
 服务器上的 SSH 普通香港出口、MySQL 受限写入隧道均已启用并实际运行，不依赖本机在线。root MySQL 凭据只留本机私有根环境；爬虫使用只能写房源四表、只读 schools 的身份，无用户/收藏/删除/改表权限。03:05 正式账本一致备份保留 30 天；本轮新源码快照无损压缩，解压 SHA 验证后才移除重复未压缩副本，正式状态不动。
 
-用户要求沿用服务器方式更新官网。已准备**后端兼容修复 `0791dd2`**，使旧网页的 12 条/页评分默认排序改为日期优先；移除启动时的 `prisma db push --accept-data-loss`，Prisma 仅构建时生成。7 项无数据库回归和 TypeScript 构建通过，独立审查无阻塞问题；Docker 镜像验证受 Docker Hub 网络超时阻塞，尚未完成。
+**后端已于 23:17 通过原 GitHub CI/CD 上线**，release `fd80294a1704464c24809397f9ba3ebb344d8ec9`。旧网页默认 12 条/页的搜索已改为日期、评分顺序；启动不再执行 schema push，镜像在 CI 构建、服务器只加载。容量不足、SSH 主机密钥算法和挂载数组顺序误报均已定位并修复，回执与实际 API/页面通过。[实际生产 CD](https://github.com/wiperi/qrent/actions/runs/41078669754)；详情见 [服务器更新路径](2026-10-30-website-server-deployment.md)。
 
-**后端排序代码尚未部署到原 API**。用户后续已明确长期走原 GitHub CI/CD，原 `production` 环境的三项部署 Secrets 已核实存在；本地 `.env` 不是发布依赖，不再索取或导出部署密码。当前准备从原 `main` 发小范围 PR，检查通过后合并并交 CI/CD 仅更新 backend，保留数据库/Redis 卷、JWT、原环境和表结构，不执行原 CD 的 down/prune。详情见 [服务器更新路径](2026-10-30-website-server-deployment.md)。
+23:19–23:20 在新后端上重新逐项核对 2,696 完整地址、4,022 学校关联及 70 个公开 API 分页，差异仍为 0，其中 Domain 1,535、Real Estate 1,161。12 张表结构、54 用户及收藏关系保持；本次验收只读，没有新增模型、地图、NSW 或赠金请求和购买。23:26 原三个常态服务均 active/enabled，正式调用数与金额未变。
 
 当前原库没有最近核验/活跃状态字段。旧库存保持原主键、日期及用户收藏；不能因为新的 2,696 地址通过，就宣称原站旧库存全部有效或把旧日期改成今天。
 
@@ -73,6 +73,6 @@
 6. 两行前端排序配置用真实 API、生产构建和浏览器验证；后端兼容行为另有 6 项接口回归。原完整数据库测试可能访问线上库，本次只运行隔离回归、backend 构建及全套 295 项爬虫离线检查。
 7. 单元地址区名例外仅限已证实的一套房；如果推广会误合并，所以保持最小范围和冲突隔离。
 8. 普通 Husky 钩子会格式化整个仓库和私有 JSON；已通过相应检查后，仅对本次 scoped commit 临时使用 `HUSKY=0`，未改钩子或停用安全检查。
-9. 按用户现有授权直接推送 fork 恢复分支，保留工作目录；不再发集成选择菜单、不创建上游 PR。
+9. 爬虫恢复分支保留 fork；用户后续明确授权小范围后端 PR 合并到原 main，由既有 CI/CD 发布。不要将整个恢复分支合入，也不要再次索取部署密码。
 
-代码仅推 `fisher-byte/qrent` 的 `fix/scraper-recovery-20261027`；原仓库不推，fork Actions 保持停用。私有证据在服务器 `output/sydney-daily-recovery-20261030/final-selection/`、`model-ready-after-free/`、`transit-reviewed/`、当日每日目录及本机同名私有输出。Key、环境、账本、备份和页面原文不推 Git。
+爬虫恢复代码与记录保留在 `fisher-byte/qrent` 的 `fix/scraper-recovery-20261027`，fork Actions 仍停用；独立后端小范围发布已经原仓库 PR/CI/CD 完成。私有证据在服务器 `output/sydney-daily-recovery-20261030/final-selection/`、`model-ready-after-free/`、`transit-reviewed/`、当日每日目录及本机同名私有输出。Key、环境、账本、备份和页面原文不推 Git。
