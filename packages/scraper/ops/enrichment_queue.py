@@ -63,8 +63,18 @@ def ready_subset(properties,result):
     return ready
 
 
+def model_ready_subset(properties,result):
+    # A model cannot repair a route, price, or missing school check. Ignore only
+    # model fields so every required route must pass before any model budget.
+    fields={'complete_ai_scores','description_cn','keywords'}
+    reviewed={**result,'records':[{**record,'checks':{
+        school:[error for error in errors if error not in fields]
+        for school,errors in record['checks'].items()}} for record in result['records']]}
+    return ready_subset(properties,reviewed)
+
+
 def runner_command(release,state,input_path,cohorts,output,count,stage,mysql_env):
-    if stage not in {'score','commute','bonus','audit','publish'} or not 0<count<=50:
+    if stage not in {'score','commute','bonus','pre-score','audit','publish'} or not 0<count<=50:
         raise ValueError('Invalid bounded queue stage')
     cmd=[str(release/'.venv/bin/python'),'-u',str(release/'enrichment_runner.py'),
          '--input',str(input_path),'--cohorts',str(cohorts),'--output',str(output),
@@ -164,7 +174,15 @@ def main():
         else:
             if args.nsw_free:run_step(job,folder,len(batch),'commute',environment)
             if args.bonus_fallback:run_step(job,folder,len(batch),'bonus',environment)
-            score=None if args.cache_only or args.skip_model else run_step(job,folder,len(batch),'score',environment)
+            score=None
+            if not (args.cache_only or args.skip_model):
+                pre_score=run_step(job,folder,len(batch),'pre-score',environment)
+                scoring=model_ready_subset(batch,pre_score)
+                if scoring:
+                    save_frozen(folder/'model-input.json',scoring)
+                    save_frozen(folder/'model-cohorts.json',cohort_subset(scoring,targets))
+                    score=run_step(job,folder,len(scoring),'score',environment,
+                                   folder/'model-input.json',folder/'model-cohorts.json')
             audit=run_step(job,folder,len(batch),'audit',environment)
             enriched=json.loads((folder/'audit/properties.json').read_text())
             ready=ready_subset(enriched,audit)

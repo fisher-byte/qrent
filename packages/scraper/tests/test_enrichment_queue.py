@@ -35,7 +35,7 @@ class EnrichmentQueueTests(unittest.TestCase):
         with self.assertRaises(ValueError):ready_subset(props,result)
 
     def test_only_model_stage_has_a_positive_request_cap(self):
-        for stage in ('score','commute','audit','publish'):
+        for stage in ('score','commute','pre-score','audit','publish'):
             cmd=runner_command(Path('/release'),Path('/official.db'),Path('/in'),
                 Path('/roles'),Path('/out'),7,stage,Path('/writer.env'))
             self.assertEqual(cmd[cmd.index('--max-maps-calls')+1],'2000' if stage=='commute' else '0')
@@ -139,6 +139,51 @@ class EnrichmentQueueTests(unittest.TestCase):
             result=json.loads((folder/'output/result.json').read_text())
             self.assertFalse(result['model_requests_allowed'])
             self.assertEqual((result['published_addresses'],result['held_addresses']),(1,0))
+
+    def test_daily_models_only_receive_addresses_with_every_required_route(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder=Path(temp);release=Path(__file__).resolve().parents[1]
+            props=[{'source':'domain','house_id':str(i),'state':'NSW',
+                'address_line1':f'{i}/1 Example Street','address_line2':'newtown-nsw-2042'} for i in (1,2,3)]
+            targets={('domain',str(i)):['UNSW','UTS'] for i in (1,2,3)}
+            save_frozen(folder/'input.json',props);save_frozen(folder/'cohorts.json',cohort_subset(props,targets))
+            state=folder/'state.db'
+            job={'release':str(release),'state':str(state),'source_hashes':{},
+                'input':str(folder/'input.json'),'cohorts':str(folder/'cohorts.json'),
+                'output':str(folder/'output'),'mysql_env':str(folder/'writer.env'),'batch_size':3}
+            for name in ('input','cohorts'):job[name+'_sha256']=hashlib.sha256(Path(job[name]).read_bytes()).hexdigest()
+            save_frozen(folder/'job.json',job)
+            stages=[]
+            def step(job,batch,count,stage,environment,*args):
+                stages.append(stage)
+                if stage in ('commute','bonus'):return {'status':'commute_partial'}
+                if stage=='score':
+                    model_input=json.loads(Path(args[0] if args else batch/'input.json').read_text())
+                    self.assertEqual([p['house_id'] for p in model_input],['1'])
+                    self.assertEqual(count,1)
+                    self.assertEqual(json.loads(Path(args[1]).read_text())['captured_source_ids'],[['domain','1']])
+                    return {'score_complete_records':1}
+                if stage=='publish':return {'publication':{'UNSW':{'inserted':1,'updated':0,'errors':0}}}
+                save_frozen(batch/stage/'properties.json',props)
+                missing=['complete_ai_scores','description_cn','keywords']
+                return {'model_budget':{'remaining_cny':50},'records':[
+                    {'source':'domain','house_id':'1','schools':['UNSW','UTS'],'input_errors':[],
+                     'checks':{'UNSW':missing if stage=='pre-score' else [],'UTS':missing if stage=='pre-score' else []}},
+                    {'source':'domain','house_id':'2','schools':['UNSW','UTS'],'input_errors':[],
+                     'checks':{'UNSW':missing,'UTS':missing+['commute_time']}},
+                    {'source':'domain','house_id':'3','schools':['UNSW','UTS'],'input_errors':[],
+                     'checks':{'UNSW':missing}}]}
+            with patch('sys.argv',['queue',str(folder/'job.json'),'--nsw-free','--bonus-fallback']), \
+                    patch('ops.enrichment_queue.OFFICIAL_STATE',state.resolve()), \
+                    patch('ops.enrichment_queue.run_step',side_effect=step),redirect_stdout(io.StringIO()):
+                main()
+            self.assertEqual(stages,['commute','bonus','pre-score','score','audit','publish'])
+            result=json.loads((folder/'output/result.json').read_text())
+            self.assertEqual((result['published_addresses'],result['held_addresses']),(1,2))
+            with patch('sys.argv',['queue',str(folder/'job.json'),'--nsw-free','--bonus-fallback']), \
+                    patch('ops.enrichment_queue.OFFICIAL_STATE',state.resolve()), \
+                    patch('ops.enrichment_queue.run_step') as run,redirect_stdout(io.StringIO()):
+                main();run.assert_not_called()
 
 
 if __name__=='__main__':unittest.main()
