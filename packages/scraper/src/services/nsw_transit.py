@@ -139,9 +139,13 @@ class NSWTransit:
             if location.get('type') not in allowed:
                 continue
             if origin:
-                number, _, street = address.split(',', 1)[0].strip().partition(' ')
+                # Compare full ranges without changing the saved request/cache text.
+                range_pattern=r'^(\d+\w*)\s*-\s*(\d+\w*)\b'
+                origin_line=re.sub(range_pattern,r'\1-\2',address.split(',',1)[0].strip())
+                number, _, street = origin_line.partition(' ')
+                returned_number=re.sub(range_pattern,r'\1-\2',str(location.get('buildingNumber','')).strip())
                 postcode = re.search(r'\bNSW\s+(\d{4})\b', address, re.I)
-                if (str(location.get('buildingNumber', '')).strip().casefold() != number.casefold()
+                if (returned_number.casefold() != number.casefold()
                         or street_key(location.get('streetName', '')) != street_key(street)
                         or not postcode or str(location.get('postCode', '')) != postcode.group(1)):
                     continue

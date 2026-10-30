@@ -110,6 +110,31 @@ class NSWTransitTests(unittest.TestCase):
                 with self.assertRaises(NSWTransitError):
                     self.client.resolve(expected+', Redfern NSW 2016, Australia',origin=True)
 
+    def test_spaced_house_range_reuses_exact_cached_geocode_without_changing_query(self):
+        address='143 -145 Mount Street, Coogee NSW 2034, Australia'
+        payload={'locations':[{'isBest':True,'type':'singlehouse','coord':[-33.92001,151.25001],
+                              'buildingNumber':'143-145','streetName':'Mount St','postCode':'2034'}]}
+        self.http.get.return_value=MagicMock(status_code=200)
+        self.http.get.return_value.json.return_value=payload
+        with patch('src.services.nsw_transit.time.sleep'):
+            self.client.request('stop_finder',{'type_sf':'any',
+                'name_sf':'143 -145 Mount Street, Coogee NSW 2034','anyMaxSizeHitList':5})
+        with patch.object(self.http,'get',side_effect=AssertionError('Reuse original geocode response')):
+            self.assertEqual(self.client.resolve(address,origin=True),'151.25001:-33.92001:EPSG:4326')
+        self.assertEqual(self.state.db.execute('SELECT status FROM calls').fetchall(),[('HTTP_200',)])
+        self.assertIsNotNone(self.state.get(self.state.key('nsw-coordinate-v1',address,True)))
+
+    def test_range_comparison_keeps_both_endpoints_and_suffixes(self):
+        self.http.get.return_value=MagicMock(status_code=200)
+        for number in ('143','145','143-147','143A-145'):
+            with self.subTest(number=number):
+                self.http.get.return_value.json.return_value={'locations':[{
+                    'isBest':True,'type':'singlehouse','coord':[-33.92001,151.25001],
+                    'buildingNumber':number,'streetName':'Mount St','postCode':'2034'}]}
+                with patch.object(self.client,'request',return_value=self.http.get.return_value.json.return_value):
+                    with self.assertRaises(NSWTransitError):
+                        self.client.resolve('143 - 145 Mount Street, Coogee NSW 2034',origin=True)
+
     def test_nsw_unresolved_pair_is_held_across_runs_for_review(self):
         prop=PropertyData(source=PropertySource.DOMAIN,house_id='123',address_line1='1 Example Street',
                           address_line2='newtown-nsw-2042',state='NSW')
