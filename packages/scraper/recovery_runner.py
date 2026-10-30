@@ -42,6 +42,12 @@ def positive(value):
     return number
 
 
+def capture_tag(value):
+    if not re.fullmatch(r'\d{8}_\d{6}_\d{6}', value):
+        raise argparse.ArgumentTypeError('must be an original YYYYMMDD_HHMMSS_microseconds run tag')
+    return value
+
+
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cities", nargs="+", choices=list(CITY_AREAS), default=["sydney", "melbourne"])
@@ -58,6 +64,7 @@ def build_parser():
     parser.add_argument("--retries", type=int, choices=[0, 1], default=1)
     parser.add_argument("--db", type=Path, default=Path(__file__).parent / "output/properties.db")
     parser.add_argument("--output", type=Path, default=Path(__file__).parent / "output")
+    parser.add_argument('--run-tag', type=capture_tag, help='Bind a recovery result to its original daily run')
     parser.add_argument("--max-requests", type=positive, default=int(os.getenv("SCRAPER_MAX_REQUESTS", "1000")))
     parser.add_argument("--proxy-bytes", type=positive, default=int(os.getenv("SCRAPER_MAX_PROXY_BYTES", "30000000")))
     parser.add_argument("--skip-proxy-check", action="store_true", help="Use only with a previously verified AU session")
@@ -99,7 +106,10 @@ def write_csv(properties, path):
 def capture(args, factories=None):
     factories = factories or FACTORIES
     args.output.mkdir(parents=True, exist_ok=True)
-    tag = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    tag = getattr(args, 'run_tag', None) or datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    capture_tag(tag)
+    if (args.output / f'{tag}_result.json').exists():
+        raise FileExistsError('Original capture evidence already exists; use its recovery checkpoint')
     budget = TrafficBudget(max_requests=args.max_requests, max_proxy_bytes=args.proxy_bytes)
     set_run_budget(budget)
     os.environ["PROXY_SESSION"] = uuid.uuid4().hex[:12]

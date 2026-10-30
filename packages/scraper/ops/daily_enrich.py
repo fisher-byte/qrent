@@ -16,6 +16,7 @@ from dotenv import dotenv_values
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from ops.enrichment_queue import write_json
+from ops.recover_school_capture import select_complete_capture
 from src.services.enrichment_state import EnrichmentState
 
 
@@ -36,11 +37,10 @@ def model_authorized(root,release):
 
 
 def run_daily(root,now=None):
-    root=Path(root);release=root/'releases/recovery-20261027'
+    root=Path(root).resolve();release=root/'releases/recovery-20261027'
     today=(now or datetime.now(ZoneInfo('Asia/Shanghai'))).strftime('%Y%m%d')
-    reports=sorted((root/'output'/('school-daily-'+today)).glob('*_result.json'),key=lambda p:p.stat().st_mtime)
-    if not reports:raise RuntimeError('No current Sydney capture receipt; no API requests')
-    capture_path=reports[-1];capture=json.loads(capture_path.read_text())
+    capture_path=select_complete_capture(root/'output'/('school-daily-'+today))
+    capture=json.loads(capture_path.read_text())
     output=root/'output'/('school-enrichment-'+capture['run'])
     environment=dict(os.environ,SCRAPER_ENV_FILE=str(release/'.env'))
     while not (root/'enrichment/bootstrap-first-pass.json').exists():

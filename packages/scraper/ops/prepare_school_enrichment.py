@@ -9,6 +9,7 @@ import mysql.connector
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from ops.enrichment_queue import cohort_subset,save_frozen,write_json,verify_sources
+from ops.recover_school_capture import validate_complete_capture
 from ops.select_school_inventory import audit
 from src.models import PropertyData
 from src.services.school_scope import targets_from_capture
@@ -41,6 +42,7 @@ def published_source_priority(mysql_env):
 
 
 def prepare(db,capture_path,output,mysql_env):
+    capture=validate_complete_capture(capture_path)
     job_path=output/'job.json'
     if job_path.exists():
         job=json.loads(job_path.read_text())
@@ -57,7 +59,6 @@ def prepare(db,capture_path,output,mysql_env):
         # Publication changes the live identity set. Never re-freeze that
         # dynamic state when resuming a partially published capture.
         return {**json.loads((output/'prepare-receipt.json').read_text()),'resumed_frozen':True}
-    capture=json.loads(capture_path.read_text())
     if not capture.get('school_scope') or capture.get('requested_cities')!=['sydney']:
         raise ValueError('Daily enrichment requires the original Sydney school capture')
     report=audit(db,capture_path.parent,output/'inventory',capture_result=capture_path)

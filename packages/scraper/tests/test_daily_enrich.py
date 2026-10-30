@@ -11,6 +11,16 @@ from unittest.mock import MagicMock
 
 from ops.enrichment_queue import cohort_subset,save_frozen
 from src.services.enrichment_state import EnrichmentState
+from capture_fixtures import report
+
+
+DAILY_RUN = '20261030_020005_158083'
+
+
+def complete_capture(root):
+    path=root/'output/school-daily-20261030'/(DAILY_RUN+'_result.json')
+    save_frozen(path,report(run=DAILY_RUN))
+    return path
 
 
 class DailyEnrichmentTests(unittest.TestCase):
@@ -62,7 +72,7 @@ class DailyEnrichmentTests(unittest.TestCase):
         daily=self.module('ops.daily_enrich')
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp);release=root/'releases/recovery-20261027';release.mkdir(parents=True)
-            save_frozen(root/'output/school-daily-20261030/run_result.json',{'run':'test-day','status':'success'})
+            complete_capture(root)
             save_frozen(root/'enrichment/bootstrap-first-pass.json',{'status':'processed'})
             calls=[]
             def run(command,**kwargs):
@@ -70,7 +80,7 @@ class DailyEnrichmentTests(unittest.TestCase):
                 if len(calls)==2:return subprocess.CompletedProcess(command,3)
                 if len(calls)==3:
                     self.assertIn('--skip-model',command)
-                    save_frozen(root/'output/school-enrichment-test-day/queue/result.json',
+                    save_frozen(root/('output/school-enrichment-'+DAILY_RUN+'/queue/result.json'),
                         {'addresses':2,'published_addresses':1,'held_addresses':1})
                 return subprocess.CompletedProcess(command,0)
             with patch('ops.daily_enrich.subprocess.run',side_effect=run), \
@@ -79,13 +89,13 @@ class DailyEnrichmentTests(unittest.TestCase):
             self.assertEqual(result['status'],'processed_with_held_records')
             self.assertFalse(result['models_enabled'])
             self.assertEqual((result['published_addresses'],result['held_addresses']),(1,1))
-            self.assertTrue((root/'output/school-enrichment-test-day/model-paused.json').is_file())
+            self.assertTrue((root/('output/school-enrichment-'+DAILY_RUN+'/model-paused.json')).is_file())
 
     def test_daily_waits_for_actual_first_pass_before_freezing_current_published_identities(self):
         daily=self.module('ops.daily_enrich')
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp);release=root/'releases/recovery-20261027';release.mkdir(parents=True)
-            save_frozen(root/'output/school-daily-20261030/run_result.json',{'run':'test-day','status':'success'})
+            complete_capture(root)
             events=[]
             def wait(seconds):
                 events.append('wait')
@@ -93,7 +103,7 @@ class DailyEnrichmentTests(unittest.TestCase):
             def run(command,**kwargs):
                 events.append('prepare' if 'prepare_school_enrichment.py' in command[1] else 'queue')
                 if events[-1]=='queue':
-                    save_frozen(root/'output/school-enrichment-test-day/queue/result.json',
+                    save_frozen(root/('output/school-enrichment-'+DAILY_RUN+'/queue/result.json'),
                         {'addresses':2,'published_addresses':2,'held_addresses':0})
                 return subprocess.CompletedProcess(command,0)
             with patch('ops.daily_enrich.time.sleep',side_effect=wait),patch('ops.daily_enrich.subprocess.run',side_effect=run),patch('ops.daily_enrich.model_authorized',return_value=False):
@@ -135,9 +145,11 @@ class DailyEnrichmentTests(unittest.TestCase):
             props.append(other)
             store=SQLiteStore(root/'properties.db');store.save(props);store.close()
             identities=[[p.source.value,p.house_id] for p in props]
-            capture=root/'capture/run_result.json'
-            save_frozen(capture,{'run':'test','status':'success','school_scope':True,'requested_cities':['sydney'],
-                'captured_source_ids':identities,'school_cohorts':{'UNSW':{'domain':[p.house_id for p in props if p.source==PropertySource.DOMAIN],'realestate':['900']}}})
+            capture=root/'output/school-daily-20261030'/(DAILY_RUN+'_result.json')
+            full_report=report(run=DAILY_RUN)
+            full_report.update(listings=len(identities),captured_source_ids=identities,
+                school_cohorts={'UNSW':{'domain':[p.house_id for p in props if p.source==PropertySource.DOMAIN],'realestate':['900']}})
+            save_frozen(capture,full_report)
             output=root/'out';env=root/'writer.env'
             priority=MagicMock(return_value={})
             with patch.object(prepare,'__file__',str(source)),patch.object(prepare,'published_source_priority',priority):
