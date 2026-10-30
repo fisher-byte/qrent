@@ -63,6 +63,8 @@ export default function SearchResults({ searchParams }: { searchParams: SearchPa
         return undefined;
       })() : undefined,
       orderBy: [{
+        publishedAt: 'desc' as const,
+      }, {
         averageScore: 'desc' as const,
       }]
     }
