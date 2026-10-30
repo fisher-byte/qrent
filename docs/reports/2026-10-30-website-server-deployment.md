@@ -21,7 +21,7 @@
 - 真实 tRPC caller 的 6 项排序、过滤和本地化回归通过，PropertyService 被替换，不访问数据库或邮件。
 - 启动测试先在原脚本观察到 `db push` 而失败；修复后实际执行 shell，仅捕获后端启动命令。共 7 项回归及 backend TypeScript 构建通过；独立审查未发现阻塞问题。
 - Docker 镜像验证停在 Docker Hub 认证端点网络超时，尚未完成镜像内验证。构建上下文只含公开源码和依赖清单，没有复制私有环境文件。
-- 当前私有根 `.env` 的三个 `DEPLOY_SERVER_*` 均为空；现有爬虫 SSH 密钥及已提供数据库密码未通过悉尼 root SSH。已请求补充有效 SSH 用户名/密码、密钥路径或现有部署配置位置；不继续猜测密码，不新增服务器凭据。
+- 已将私有根 `.env` 的 `DEPLOY_SERVER_HOST` 配置为用户给定 IP；`DEPLOY_SERVER_USERNAME` / `DEPLOY_SERVER_PASSWORD` 仍为空；现有爬虫 SSH 密钥及已提供数据库密码未通过悉尼 root SSH。已请求补充有效 SSH 用户名/密码、密钥路径或现有部署配置位置；不继续猜测密码，不新增服务器凭据。
 - 因此本次后端排序/启动改动**尚未部署原官网 API**。数据补齐和原表写入继续正常，不能用数据发布回执声称后端代码已部署。
 
 取得 SSH 后先只读确认实际工作目录、容器、镜像和环境，再备份代码/部署定义及原库，替换 backend 服务并核对 `/echo`、原搜索 API 和实际页面。保留数据库/Redis 容器、卷、JWT 和其他原环境配置；不执行原 CD 的 `compose down`、全机 prune 或 schema push。fork Actions 仍停用，继续使用本机检查和 SSH。
