@@ -36,3 +36,15 @@
 先观察到缺少恢复能力、固定 run、daily guard 和 shell exit-2 误触发的失败；修复后以 `SCRAPER_ENV_FILE=/dev/null PYTHONPATH=. ../../.venv/bin/python -B -m unittest discover -s tests` 验收：**314 项通过**。Bash 语法和 `git diff --check` 通过。测试中的网页、模型拒绝日志来自离线 doubles；未运行正式浏览器、模型、地图或生产写入。
 
 同一套 314 项另在外网 DNS/TCP 连接被阻断、仅允许本机 loopback/Unix socket 的环境中全部通过，确认没有供应商外网请求依赖。
+
+## 独立审查后的增量约束
+
+独立审查复现了空/缺失/外来学校身份、虚高或过低区域计数、依赖源码漂移、原库存缺失或丢失已采身份的反例；这些反例先失败，再修复。
+
+- `school_cohorts` 的 `(source,id)` 并集必须与 `captured_source_ids` 严格一致；同一身份属于多个学校仍合法。
+- 原报告、单轮和聚合按来源满足 `max(area.count) <= unique_source_ids <= sum(area.count)`。保留跨区重叠；旧报告没有新增逐区身份清单，不把这一数量边界声称为逐区逐条核验。
+- 冻结原 release 的全部 `src/**/*.py`、公开区域 JSON 配置及实际采集入口/包装脚本。`.env`、venv 和缓存不参与读取或散列；跨重启依赖漂移在发请求前拒绝。
+- 恢复先拒绝缺失/符号链接 `properties.db`。prepare 只允许原库存路径，并用 SQLite `mode=ro` 确认原报告全部来源 ID 仍存在，再允许任何补全或写库阶段。
+- 独立 Python 子进程加载真实 settings 与伪 `.env`，11 项布尔校验确认 `load_dotenv` 不会恢复已置空的住宅/模型/地图凭据，也不会替换固定普通出口。
+
+最终外网 DNS/TCP 阻断下完整 **321 项测试通过**；独立定点恢复/入口/daily 共 32 项通过，Bash 语法与 diff 检查通过。主任务以当天真实原报告离线核对：4,860 来源 ID、新约束接受、仍为 incomplete，失败区恰为原三处 Domain。原始报告仅留私有 output，没有加入 Git。本增量依然没有上传或执行服务器补抓。

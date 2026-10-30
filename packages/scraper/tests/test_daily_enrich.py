@@ -149,6 +149,8 @@ class DailyEnrichmentTests(unittest.TestCase):
             full_report=report(run=DAILY_RUN)
             full_report.update(listings=len(identities),captured_source_ids=identities,
                 school_cohorts={'UNSW':{'domain':[p.house_id for p in props if p.source==PropertySource.DOMAIN],'realestate':['900']}})
+            # 51 Domain IDs fit the 22 area observations (30 plus 21), with overlap allowed.
+            full_report['areas'][0]['count']=30
             save_frozen(capture,full_report)
             output=root/'out';env=root/'writer.env'
             priority=MagicMock(return_value={})

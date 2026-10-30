@@ -44,7 +44,7 @@
 - [x] Add failing tests for subset/newer-partial rejection and original-run selection.
 - [x] Wire the shell and both daily guards; retain source/job checks and original enrichment service.
 - [x] Run the isolated complete scraper suite, shell syntax and diff checks.
-- [ ] Commit scoped source/tests/docs and push the existing fork branch; stop before server deployment.
+- [x] Commit scoped source/tests/docs and push the existing fork branch; stop before server deployment.
 
 ## Execution evidence and decisions
 
@@ -53,3 +53,4 @@
 - Convert child error 2 to failure 1 because the existing root treats 2 as publishable; the root deployment contract is otherwise retained.
 - Recovery CLI is restricted to the current Shanghai calendar day, avoiding a historical completion accidentally starting today's unrelated daily service.
 - Parent review is the independent whole-change gate. No server upload, collection recovery or production write is included in this implementation turn.
+- Independent review fixes: exact cohort identity union; per-source overlap-aware count bounds; complete capture-source fingerprint; original-inventory existence/path and read-only captured-ID coverage before preparation. Their counterexamples were RED before the fixes. Final external-network-blocked suite 321/321 and independent targeted suite 32/32 passed; today's real 4,860-ID original report passes the stricter validator while remaining incomplete.

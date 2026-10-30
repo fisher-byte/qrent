@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
+import sqlite3
 import subprocess
 import sys
 from zoneinfo import ZoneInfo
@@ -81,16 +82,31 @@ def validate_data(data, expected, run, allow_empty=False):
             raise ValueError('Query school provenance changed')
     identities = data.get('captured_source_ids', [])
     normalized = [(source, str(identity)) for source, identity in identities]
+    expected_sources = {source for source, _ in expected}
     if ((not normalized and not allow_empty) or len(set(normalized)) != len(normalized)
-            or any(source not in {'domain', 'realestate'} or not identity.isdigit() for source, identity in normalized)
+            or any(source not in expected_sources or not identity.isdigit() for source, identity in normalized)
             or data.get('listings') != len(normalized)):
         raise ValueError('Capture identity set does not match its recorded listings')
-    for school, sources in data.get('school_cohorts', {}).items():
-        if school not in {'UNSW', 'USYD', 'UTS'}:
+    for source in expected_sources:
+        counts = [item['count'] for item in areas if item['source'] == source]
+        distinct = len({identity for item_source, identity in normalized if item_source == source})
+        # Areas may overlap. Their observations need not sum to distinct homes.
+        if not max(counts) <= distinct <= sum(counts):
+            raise ValueError('Source identity count disagrees with its query counts')
+    cohorts = data.get('school_cohorts')
+    if not isinstance(cohorts, dict):
+        raise ValueError('Capture school provenance is missing')
+    cohort_ids = set()
+    for school, sources in cohorts.items():
+        if school not in {'UNSW', 'USYD', 'UTS'} or not isinstance(sources, dict):
             raise ValueError('Unknown Sydney school in capture evidence')
         for source, ids in sources.items():
-            if source not in {'domain', 'realestate'} or any(not str(value).isdigit() for value in ids):
+            if (source not in expected_sources or not isinstance(ids, list)
+                    or any(not str(value).isdigit() for value in ids)):
                 raise ValueError('Invalid captured school identity')
+            cohort_ids.update((source, str(value)) for value in ids)
+    if cohort_ids != set(normalized):
+        raise ValueError('School-cohort identities must exactly cover captured source identities')
     errors = data.get('errors')
     if not isinstance(errors, list):
         raise ValueError('Capture errors were not recorded')
@@ -163,8 +179,36 @@ def capture_lock(root, supplied=None):
 
 
 def source_fingerprint(root):
-    paths = [root / 'releases/recovery-20261027/recovery_runner.py', Path(__file__).resolve()]
-    return {str(path): digest(path) for path in paths}
+    release = root / 'releases/recovery-20261027'
+    paths = {release / 'recovery_runner.py', Path(__file__).resolve()}
+    excluded = {'__pycache__', '.venv', 'venv', '.pytest_cache', '.mypy_cache'}
+    paths.update(path for path in (release / 'src').rglob('*.py')
+                 if not excluded.intersection(path.relative_to(release).parts))
+    paths.update((release / 'src/config').glob('*.json'))
+    paths.update(path for path in (release / 'ops/recover_school_capture.py',
+                                  release / 'ops/run_school_capture.sh') if path.exists())
+    for path in paths:
+        if path.is_symlink() or path.resolve() != path.absolute():
+            raise ValueError('Capture source fingerprint must not follow symlinks')
+    # Only public capture sources/configuration: no .env, venv or cache files.
+    return {str(path): digest(path) for path in sorted(paths)}
+
+
+def require_inventory(path, identities=None):
+    path = Path(path)
+    if path.is_symlink() or not path.is_file():
+        raise IncompleteCapture('Original properties.db is missing or linked; do not create a replacement')
+    if identities is None:
+        return
+    expected = {(source, str(identity)) for source, identity in identities}
+    try:
+        with sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True) as db:
+            present = {(source, str(identity)) for source, identity in
+                       db.execute('SELECT source,house_id FROM properties')}
+    except sqlite3.Error as error:
+        raise IncompleteCapture('Original captured inventory cannot be read; no enrichment allowed') from error
+    if expected - present:
+        raise IncompleteCapture('Original inventory is missing captured identities; no enrichment allowed')
 
 
 def recovery_paths(original):
@@ -305,6 +349,7 @@ def recover(root, original, lock_fd=None, run_round=None):
         raise ValueError('Original capture evidence must not use symlinks')
     original = original.resolve()
     with capture_lock(root, lock_fd) as fd:
+        require_inventory(root / 'properties.db')
         if campaign_root(original) != root:
             raise ValueError('Recovery must use the original crawler root and SQLite inventory')
         base = read_json(original)

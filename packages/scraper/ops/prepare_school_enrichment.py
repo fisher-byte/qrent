@@ -9,7 +9,7 @@ import mysql.connector
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from ops.enrichment_queue import cohort_subset,save_frozen,write_json,verify_sources
-from ops.recover_school_capture import validate_complete_capture
+from ops.recover_school_capture import campaign_root,require_inventory,validate_complete_capture
 from ops.select_school_inventory import audit
 from src.models import PropertyData
 from src.services.school_scope import targets_from_capture
@@ -43,6 +43,10 @@ def published_source_priority(mysql_env):
 
 def prepare(db,capture_path,output,mysql_env):
     capture=validate_complete_capture(capture_path)
+    original=Path(capture_path).resolve().parent/(capture['run']+'_result.json')
+    if Path(db).resolve()!=campaign_root(original)/'properties.db':
+        raise ValueError('Daily enrichment must use the original captured inventory')
+    require_inventory(db,capture['captured_source_ids'])
     job_path=output/'job.json'
     if job_path.exists():
         job=json.loads(job_path.read_text())

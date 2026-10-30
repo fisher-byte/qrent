@@ -6,6 +6,7 @@ import importlib
 import json
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -152,9 +153,130 @@ class CaptureRecoveryTests(unittest.TestCase):
                 save(original, data)
                 with self.assertRaises(ValueError): recovery.validate_complete_capture(original)
 
+    def test_original_cannot_omit_captured_school_identities_or_add_foreign_ones(self):
+        recovery = self.module()
+        for change in ['empty', 'missing', 'foreign']:
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as temp:
+                root, original = self.campaign(temp, failed=[])
+                data = json.loads(original.read_text())
+                if change == 'empty': data['school_cohorts'] = {}
+                elif change == 'missing':
+                    for sources in data['school_cohorts'].values():
+                        if 'domain' in sources: sources['domain'] = [x for x in sources['domain'] if x != '100']
+                else: data['school_cohorts']['UNSW']['domain'].append('999999')
+                save(original, data)
+                with self.assertRaises(ValueError): recovery.validate_complete_capture(original)
+
+    def test_a_recovery_round_cannot_introduce_ids_without_the_exact_school_union(self):
+        recovery = self.module()
+        for change in ['empty', 'missing', 'foreign']:
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as temp:
+                root, original = self.campaign(temp)
+                def invalid(root, base, areas, folder, lock_fd):
+                    data = report([('domain', a) for a in areas])
+                    data['captured_source_ids'] = [['domain', str(i)] for i in [900,901,902]]
+                    data['school_cohorts'] = {'UNSW': {'domain': ['900','901']},
+                        'USYD': {'domain': ['902']}, 'UTS': {'domain': ['902']}}
+                    if change == 'empty': data['school_cohorts'] = {}
+                    elif change == 'missing':
+                        data['school_cohorts']['USYD']['domain'] = []
+                        data['school_cohorts']['UTS']['domain'] = []
+                    else: data['school_cohorts']['UNSW']['domain'].append('999999')
+                    return save(folder/(RUN+'_result.json'), data)
+                with self.assertRaises(ValueError): recovery.recover(root, original, run_round=invalid)
+
+    def test_source_counts_bound_distinct_ids_while_allowing_cross_area_overlap(self):
+        recovery = self.module()
+        for change in ['too_many', 'too_few', 'overlap']:
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as temp:
+                root, original = self.campaign(temp, failed=[])
+                data = json.loads(original.read_text())
+                if change == 'too_many': data['areas'][0]['count'] = 99999
+                elif change == 'too_few':
+                    for area in data['areas']:
+                        if area['source'] == 'domain': area['count'] = 0
+                else:
+                    for area in data['areas']: area['count'] = 2
+                save(original, data)
+                if change == 'overlap':
+                    validated = recovery.validate_complete_capture(original)
+                    self.assertEqual(validated['listings'], 41)
+                    for school in ['UNSW','USYD','UTS']:
+                        self.assertIn('100',validated['school_cohorts'][school]['domain'])
+                else:
+                    with self.assertRaises(ValueError): recovery.validate_complete_capture(original)
+
+    def test_capture_dependency_drift_is_rejected_before_any_resumed_request(self):
+        recovery = self.module()
+        with tempfile.TemporaryDirectory() as temp:
+            root, original = self.campaign(temp)
+            dependency = root/'releases/recovery-20261027/src/utils/browser.py'
+            dependency.parent.mkdir(parents=True); dependency.write_text('reviewed browser source')
+            release = root/'releases/recovery-20261027'
+            private = release/'.env'; private.write_text('FAKE_PRIVATE_VALUE=not-source')
+            cache = release/'src/__pycache__/cached.py'; cache.parent.mkdir(); cache.write_text('cached code')
+            venv = release/'.venv/library.py'; venv.parent.mkdir(); venv.write_text('installed dependency')
+            fingerprint = recovery.source_fingerprint(root)
+            self.assertIn(str(dependency), fingerprint)
+            for ignored in (private,cache,venv): self.assertNotIn(str(ignored),fingerprint)
+            def interrupted(root, base, areas, folder, lock_fd):
+                save(folder/(RUN+'_result.json'),report([('domain', a) for a in areas],failed=['haymarket-nsw-2000']))
+                raise RuntimeError('Parent interrupted after the first round')
+            with self.assertRaises(RuntimeError): recovery.recover(root, original, run_round=interrupted)
+            dependency.write_text('changed browser source')
+            with patch.object(recovery,'run_round',side_effect=AssertionError('Dependency drift reached the network boundary')):
+                with self.assertRaises(ValueError): recovery.recover(root, original)
+
+    def test_recovery_rejects_a_missing_or_linked_original_inventory_before_requests(self):
+        recovery = self.module()
+        for change in ['missing','symlink']:
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as temp:
+                root, original = self.campaign(temp)
+                inventory = root/'properties.db'; inventory.unlink()
+                if change == 'symlink':
+                    other = root/'another.db'; other.write_bytes(b'not the original inventory')
+                    inventory.symlink_to(other)
+                with patch.object(recovery,'run_round',side_effect=AssertionError('Invalid inventory reached a request')):
+                    with self.assertRaises(ValueError): recovery.recover(root, original)
+                self.assertFalse((original.parent/('recovery-'+RUN)).exists())
+
+    def test_preparation_rejects_a_full_report_when_original_inventory_lost_captured_ids(self):
+        from ops.prepare_school_enrichment import prepare
+        with tempfile.TemporaryDirectory() as temp:
+            root, original = self.campaign(temp, failed=[])
+            inventory = root/'properties.db'; inventory.unlink()
+            with sqlite3.connect(inventory) as db:
+                db.execute('CREATE TABLE properties(source TEXT, house_id TEXT)')
+                db.execute("INSERT INTO properties VALUES ('domain','100')")
+            with patch('ops.prepare_school_enrichment.audit',side_effect=AssertionError('Lost captured IDs reached preparation')):
+                with self.assertRaises(ValueError): prepare(inventory,original,root/'out',root/'writer.env')
+            self.assertFalse((root/'out').exists())
+
+    def test_dotenv_cannot_restore_paid_keys_or_replace_the_fixed_ordinary_route(self):
+        recovery = self.module()
+        with tempfile.TemporaryDirectory() as temp:
+            release = Path(temp).resolve()
+            (release/'.env').write_text('PROXY_SERVER=http://paid.invalid:8080\nPROXY_SOURCES=domain\n'
+                'PROPERTY_RATING_API_KEY=offline-model\nDASHSCOPE_API_KEY=offline-fallback\n'
+                'GOOGLE_MAPS_API_KEY=offline-map\nNSW_API_KEY=offline-nsw\nDISTANCE_MATRIX_API_KEY=offline-gift\n'
+                'DOMAIN_BROWSER_PROXY=http://wrong.invalid:8080\nDOMAIN_NATIVE_NETWORK=false\n')
+            environment = recovery.ordinary_environment(dict(os.environ),release)
+            environment['PYTHONPATH'] = str(Path(__file__).resolve().parents[1])
+            code = '''import json,os
+from src.config import ScoringConfig,CommuteConfig
+names=['PROXY_SERVER','PROXY_SOURCES','PROPERTY_RATING_API_KEY','DASHSCOPE_API_KEY',
+       'GOOGLE_MAPS_API_KEY','NSW_API_KEY','DISTANCE_MATRIX_API_KEY']
+checks=[os.environ.get(name)=='' for name in names]
+checks.extend([ScoringConfig().api_key=='',CommuteConfig().api_key=='',
+ os.environ['DOMAIN_BROWSER_PROXY']=='socks5://127.0.0.1:18082',os.environ['DOMAIN_NATIVE_NETWORK']=='true'])
+print(json.dumps(checks))
+'''
+            result = subprocess.run([sys.executable,'-B','-c',code],env=environment,capture_output=True,text=True,check=True)
+            self.assertEqual(json.loads(result.stdout), [True]*11)
+
     def test_wrong_run_scope_or_paid_transport_in_a_round_cannot_complete_recovery(self):
         recovery = self.module()
-        for change in ['run', 'extra_area', 'residential', 'model', 'details']:
+        for change in ['run', 'extra_area', 'residential', 'model', 'details', 'counts']:
             with self.subTest(change=change), tempfile.TemporaryDirectory() as temp:
                 root, original = self.campaign(temp)
                 def invalid(root, base, areas, folder, lock_fd):
@@ -164,8 +286,10 @@ class CaptureRecoveryTests(unittest.TestCase):
                     if change == 'residential': data['traffic']['proxy_wire_bytes'] = 1
                     if change == 'model': data['scored'] = 1
                     if change == 'details': data['detail_requests'] = 1
+                    if change == 'counts': data['areas'][0]['count'] = 99999
                     return save(folder / (RUN + '_result.json'), data)
                 with self.assertRaises(ValueError): recovery.recover(root, original, run_round=invalid)
+                self.assertFalse((original.parent/(RUN+'_recovered_result.json')).exists())
 
     def test_non_domain_or_non_capture_errors_never_launch_recovery(self):
         recovery = self.module()
