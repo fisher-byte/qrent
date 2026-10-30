@@ -10,6 +10,8 @@
 
 当前明确阻塞是构建诊断权限：[失败构建](https://vercel.com/wiperis-projects/qrent-frontend/3tMqTDvjNwL435zFU8dtRm1sL3wA) 在已登录 `yyzyfish5@gmail.com` 下返回项目 404；部署日志 API 返回 403。本地没有原生产 Notion 凭据，也没有导出 GitHub/Vercel Secrets。实际失败原因仍未知，需要该构建的错误日志或现有账号的原项目查看权限。源码补丁及回归已可审查，不能为了构建变绿而去掉完整性保护或把缺失正文当作成功。
 
+失败部署后再次实测生产 HTTP 为 8 通过、1 失败：既有通知/语言/canonical/404 检查通过，失败的是新增旧英文文章应 308 的检查，实际仍为 200。没有跳过该检查来宣称最终版本通过。另只读打开公开 Notion 源目录及被遮住的三篇源文，确认不同正文与重复属性，未登录编辑或修改 CMS；源码修复仍须在成功生产发布后逐 ID 验收。
+
 ## 审计依据与基线
 
 按用户指定的 [site-audit-zyppy](https://github.com/fisher-byte/site-audit-zyppy)，固定参考版本 `1afd81e91d6456cda4f4f3bb1202e3a31476ef56`，阅读要素清单并实际运行网页自检及上线门禁。配置在根目录 `seo-gate.config.json`；单一 urlset 使用工具的 `childSitemaps: ["sitemap.xml"]` 选项，不能误按 sitemap index 解析后声称查过全部 URL。
