@@ -59,7 +59,7 @@
 
 用户要求沿用服务器方式更新官网。已准备**后端兼容修复 `0791dd2`**，使旧网页的 12 条/页评分默认排序改为日期优先；移除启动时的 `prisma db push --accept-data-loss`，Prisma 仅构建时生成。7 项无数据库回归和 TypeScript 构建通过，独立审查无阻塞问题；Docker 镜像验证受 Docker Hub 网络超时阻塞，尚未完成。
 
-**后端排序代码尚未部署到原 API**：私有 `.env` 的部署主机已配置为用户给定 IP，部署用户名/密码为空，现有爬虫密钥/数据库密码未通过悉尼机器 SSH。已请求补充实际 SSH 认证，不再要求 Vercel 账号。取得后只更新 backend，保留数据库/Redis 卷、JWT、原环境和表结构，不执行原 CD 的 down/prune。详情见 [服务器更新路径](2026-10-30-website-server-deployment.md)。
+**后端排序代码尚未部署到原 API**。用户后续已明确长期走原 GitHub CI/CD，原 `production` 环境的三项部署 Secrets 已核实存在；本地 `.env` 不是发布依赖，不再索取或导出部署密码。当前准备从原 `main` 发小范围 PR，检查通过后合并并交 CI/CD 仅更新 backend，保留数据库/Redis 卷、JWT、原环境和表结构，不执行原 CD 的 down/prune。详情见 [服务器更新路径](2026-10-30-website-server-deployment.md)。
 
 当前原库没有最近核验/活跃状态字段。旧库存保持原主键、日期及用户收藏；不能因为新的 2,696 地址通过，就宣称原站旧库存全部有效或把旧日期改成今天。
 

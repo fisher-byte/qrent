@@ -5,7 +5,7 @@
 ## 已确定的边界
 
 - **2026-10-30 12:34 已按用户澄清恢复模型授权。** 用户确认费用提示来自昨日，并要求继续悉尼；仅将本次查账人工暂停标记过期并保留审查记录，恢复原 `model-investigation-cleared` 文件，不删除旧失败／不确定调用或其他暂停。新专用 Key 的云端预算仍为 CNY 50/月、达额停止；财务证据及 `resume-receipt.json` 在私有 `output/billing-investigation-20261030/`，不推 Git。原异常 Key 已永久删除，原共享 OCR Key 已禁用；新 Key 仅在爬虫机私有环境，限制服务器 IPv4 和固定模型 `qwen3.7-flash-2026-07-15`。每日模型是否允许调用仍由 `ops/daily_enrich.py` 的 Key SHA/固定模型/暂停记录检查决定。
-- 只推送 `fisher-byte/qrent` 的恢复分支；不推送原 `wiperi/qrent`。fork 的 GitHub Actions 已停用，部署使用本机检查和 SSH。
+- **用户 2026-10-30 最新长期部署约定：** 后端代码、Docker、依赖和 `.github` 发布流程通过 GitHub PR 合并到原 `wiperi/qrent`，由原 CI/CD 使用既有 `production` 环境 Secrets 部署；开发不日常登录部署机。本次用户已明确继续按此流程发布，取代早先只推 fork 的发布边界。广泛爬虫恢复分支仍保留在 `fisher-byte/qrent`，fork Actions 继续停用；原仓库只合并经过检查的小范围发布 PR，不把整个恢复分支合入。
 - 用户已确认保留其他项目与测试 Key；本项目仅使用 Qrent 专用 Key，不批量禁用其他 Key。CNY 50/月的云端限制只覆盖 Qrent 专用 Key，不是整个阿里云账号的总限额。
 - 用户最新授权：模型费用独立计算，每月最多 **CNY 50**，按人民币原生计价预留/结算；非模型新增 API/代理费用继续最多 **USD 4/月**，通勤新增现金 **USD 0**。代理累计采购最多 **USD 1.50**；两张已付发票各 USD 0.30，合计 **USD 0.60 / 2GB**。已接入既有 Distancematrix.ai Accurate 赠金，只在 NSW 无成功结果后显式补缺；赠金跨 Key、跨月累计最多 USD 40，请求前预留，无现金回退，不自动购买。墨尔本继续暂缓。
 - Google Cloud 的预算是 **AUD 5 提醒**，不是 Maps 自动停费。已设 ComputeRoutes 每日 300 次、Matrix 每日 0；受控程序每个真实结算组每月最多 9,500 次。同账号多 Key 不增加免费量，不提高调用闸值去启动未经预算覆盖的全量。
@@ -13,7 +13,7 @@
 
 ## 持久状态与访问
 
-- 现有 `ssh qrent-prod` 连接广州爬虫机；`ssh hk-relay` 连接现有香港出口。不要重新要求用户登录腾讯云，除非当前 SSH 有实际故障。
+- 现有 `ssh qrent-prod` 连接用户称为 yibin 的爬虫机（腾讯云广州）；`ssh hk-relay` 连接现有香港出口。不要重新要求用户登录腾讯云，除非当前 SSH 有实际故障。
 - **唯一正式补充账本：** `qrent-prod:/root/qrent-scraper/enrichment/state.db`。必须复用其缓存、失败/不确定调用记录和费用预留；禁止清空、换空文件或用旧快照重启收费任务。正式任务在该主机串行执行。
 - 本地 `packages/scraper/output/enrichment-validation-20261029/enrichment-cache.db` 是历史验证快照。本地提供商 Key 为空；新 Key 的本机临时副本已删除，只有服务器私有环境用于正式请求。服务器 `.env` 中 `PROPERTY_RATING_API_KEY` 为专用新 Key，`QWEN_MODEL` 固定上述版本，`DASHSCOPE_HTTP_BASE_URL` 为该空间的北京接口；其他模型 Key 变量为空。不要回填旧凭据或将私有配置推 Git。
 - Maps 普通香港出口为 `socks5h://127.0.0.1:18082`，由 `qrent-maps-egress.service` 复用既有服务器间 SSH 访问；不依赖本机在线。**18080 是旧 LycheeIP 住宅代理链路，不用于 Maps。**
@@ -67,6 +67,10 @@
 - 当日每日服务曾因冻结 job 早于主目录新部署而报 `Source changed; queue requires review`，与余额无关。旧 job 尚无 queue/API 阶段、原输入 SHA 未变，完整归档到同名 `-before-source-review-20261030_105913` 目录；10:59 重新准备并以模型关闭的免费/缓存路径执行，12:38 已完成。旧 job 和正式账本均保留，不从空库重跑。
 - 15:03 最终零 API 复核：原 41 查询取得 5,075 来源 ID，594 条隐藏/不完整地址记录未进入地址分组；3,048 地址组中 220 冲突组、57 其他输入不合格组隔离，留下 **2,771 地址、4,130 必要学校关联**。其中 **2,696 完整地址、4,022 学校关联**已逐条与原 MySQL 及公开 API 对齐；剩余 75 地址缺 107 对可验证通勤，其中 42 还缺模型字段，继续隔离。不能以 `ready_properties=2697` 的单校部分可用数冒充完整发布数。
 - 校验修复只统一供应商返回的街道类型缩写及数字区间空格，保留完整房号、端点、原查询、永久缓存键。19 对公交复验原赠金响应，新增请求为 0；3 地址的 5 次首次 NSW 免费路线均成功。另仅对 `305/1 Treacy Street NSW 2220` 已证实的 Hurstville/Hurstville Grove 区名差异做分组例外，不扩展到其他门牌、不改旧主键或旧行。
-- 官网搜索按评分优先导致未复核旧高分库存居前，后端兼容修复 `0791dd2` 已通过 7 项无数据库回归及 TypeScript 构建，但尚未部署 API。用户要求走原服务器更新、不使用个人 Vercel 账号。根私有 `.env` 的部署主机已配置为用户给定 IP；`DEPLOY_SERVER_USERNAME` / `DEPLOY_SERVER_PASSWORD` 为空，现有数据库密码/爬虫密钥未通过悉尼 SSH；等待有效 SSH 登录，不继续猜测。原 backend 启动的 `db push --accept-data-loss` 已从修复版移除，原 CD 的 down/prune 不执行。见服务器更新报告。
+- 官网搜索按评分优先导致未复核旧高分库存居前，后端兼容修复 `0791dd2` 已通过 7 项无数据库回归及 TypeScript 构建，但尚未部署 API。用户要求走原服务器更新、不使用个人 Vercel 账号。已确认原仓库 `production` 环境有 18 项 Secrets，其中包括完整部署主机/用户名/密码；CI 直接使用，不导出到本地或 fork。本地部署字段为空不再构成发布阻塞；实际用本地 `DB_ROOT_PASSWORD` 提交 root SSH 后被拒，不能混淆数据库身份与部署身份，也不继续猜测密码。当前改走原 GitHub CI/CD 发布，完成状态以实际检查、CD 回执和公开页面为准。原 backend 启动的 `db push --accept-data-loss` 已从修复版移除，原 CD 的 down/prune 不执行。见服务器更新报告。
 
 - 日常队列评分前新增 `pre-score`：模型/地图上限均为 0，只忽略三项 AI 字段错误，全部原学校通勤和其他输入必须有效；原始评分子集及学校归属冻结，最后 audit/publish 仍检查完整批次。真实 75 条 held 在提供商凭据置空的安全验收中，2 个预检批次、0 个评分阶段、0 个新增调用、0 次生产写入，四张调用/费用账表 SHA 全部未变。不能将该验收称为下一次 02:00 的真实调度，也不声称新测试直接模拟了“部分评分后、批次回执前”的中断。
+
+- 日常分工长期保持：后端和 MySQL 同在部署服务器；Agent 使用数据库账户直接更新数据，保留备份、原表/主键/收藏保护；爬虫在独立 yibin 机通过数据库写入。后端/Docker/依赖变更交 GitHub 合并及 CI/CD，不能再因本地缺 SSH 部署认证反复索取服务器密码。
+
+- 2026-10-30 GitHub 发布实际进度：小范围 PR `wiperi/qrent#293`，head `fd1237cb39b257a910440339dd137d83d1de1fca`；CI run `41054391656` 全部成功，含 7 项后端回归、8 项部署回归、6 项健康验收及真实 Docker 镜像构建/无网络客户端检查。标准 squash 合并被原 main 分支保护拒绝，状态 `REVIEW_REQUIRED`；当前作者 fisher-byte 无管理员权限，仓库未启用 auto-merge。已请用户/维护者在 GitHub 批准并合并，之后继续生产 CD/API/页面验收。不伪造审批或用其他账号自批，不用 admin 绕过保护。外部 Vercel PR 状态不属于必需检查（必需项仅 ci-success，已通过），不能重新把 Vercel 账号当成后端部署阻塞。当前尚无 merge commit 或生产 CD，后端排序修复尚未上线。

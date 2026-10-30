@@ -82,5 +82,7 @@
 - [x] 核对 `CLAUDE.md`、原 SSH/Docker CD、私有环境配置和实际前后端响应。
 - [x] 将旧搜索默认排序改为后端兼容，保留其他请求；真实 tRPC 6 项回归通过。
 - [x] 移除原启动的 `db push --accept-data-loss`，构建时生成 Prisma、固定 pnpm；启动回归和 backend TypeScript 构建通过，共 7 项测试。独立审查无阻塞问题。
-- [ ] 悉尼 `139.180.164.78` 有效 SSH 认证到位后，先核对原部署再只更新 backend，保留原环境/卷/表。部署主机已配置，当前部署用户名/密码为空，现有认证未通过；已请求补充，不继续猜测，不要求 Vercel 账号。
-- [ ] 取得真实镜像构建、原 API 默认排序和实际网页验收；本机 Docker Hub 拉取超时，尚未确认镜像。不能以数据发布冒充后端代码部署。
+- [x] 用户明确改走原 GitHub 合并/CI/CD，已确认 production 三项部署 Secrets，准备最小 PR #293 并通过真实 CI 和 Docker 构建；无需本地 SSH 部署密码。
+- [ ] GitHub main 的 REVIEW_REQUIRED 由维护者批准并合并后，取得生产 CD 回执；当前作者标准合并被分支保护拒绝，不能绕过。
+- [x] 取得原仓库 CI 的真实 Docker 镜像构建及无网络生成客户端验收；本机 Docker Hub 网络问题不再阻塞 CI。
+- [ ] 生产 CD 后核对原 API 默认排序和实际网页；当前 PR 尚未合并，不以 CI 成功冒充已部署。
