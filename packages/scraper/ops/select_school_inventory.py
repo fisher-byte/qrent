@@ -15,6 +15,7 @@ from src.models import PropertyData
 from src.services.inventory_selection import select_inventory
 from src.services.school_scope import schools_for_property, targets_from_capture, school_areas
 from src.services.publication import publication_errors
+from ops.publishable_capture import capture_summary
 
 
 def audit(db_path, campaign, output, *, capture_result=None):
@@ -50,7 +51,7 @@ def audit(db_path, campaign, output, *, capture_result=None):
     report = {'checked_at':datetime.now(ZoneInfo('Asia/Shanghai')).isoformat(), 'read_only':True,
         'new_api_calls':0,'production_writes':0,'campaign':campaign.name,
         'capture_complete_inventory':snapshot.get('complete_inventory',False),
-        'capture_window_complete':snapshot.get('status')=='success' if capture_result else False,
+        'capture_window_complete':capture_summary(snapshot)['capture_window_complete'] if capture_result else False,
         'scope_basis':'query_provenance' if capture_result else 'inventory_address_estimate',
         'max_pages_per_area':snapshot.get('max_pages_per_area'),
         'scope':'Original Sydney TARGET_AREAS; REA postcode queries / Domain suburb queries; historical VIC campus regions',

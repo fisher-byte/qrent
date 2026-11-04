@@ -25,5 +25,5 @@ class SchoolInventoryTests(unittest.TestCase):
             self.assertEqual(report['selected_source_ids'],1)
             self.assertEqual(report['by_school']['UNSW']['source_ids'],1)
             self.assertFalse(report['capture_complete_inventory'])
-            self.assertTrue(report['capture_window_complete'])
+            self.assertFalse(report['capture_window_complete'])
 

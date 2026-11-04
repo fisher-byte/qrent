@@ -12,7 +12,12 @@ export SCRAPER_ENV_FILE="$qrent_release/.env"
 # Both a full scheduled run and explicit recovery retain the original lock.
 if [[ $# == 2 && "$1" == --recover-only ]]; then
     qrent_report=$2
+    qrent_validator=ops/recover_school_capture.py
+elif [[ $# == 2 && "$1" == --publish-only ]]; then
+    qrent_report=$2
+    qrent_validator=ops/publishable_capture.py
 elif [[ $# == 0 ]]; then
+    qrent_validator=ops/publishable_capture.py
     qrent_run=$(.venv/bin/python -c 'from datetime import datetime;print(datetime.now().strftime("%Y%m%d_%H%M%S_%f"))')
     qrent_output="$qrent_root/output/school-daily-${qrent_run:0:8}"
     qrent_report="$qrent_output/${qrent_run}_result.json"
@@ -27,12 +32,12 @@ elif [[ $# == 0 ]]; then
     [[ "$qrent_status" == 2 ]] && exit 1
     [[ "$qrent_status" == 0 || "$qrent_status" == 1 ]] || exit "$qrent_status"
 else
-    echo 'Use the fixed scheduled window or --recover-only ORIGINAL_REPORT' >&2
+    echo 'Use the fixed scheduled window, --publish-only or --recover-only ORIGINAL_REPORT' >&2
     exit 64
 fi
-# Return zero to the existing root trigger only after all 41 queries are proven.
+# Verify actual identities; partial query coverage no longer blocks valid rows.
 qrent_status=0
-.venv/bin/python -u ops/recover_school_capture.py --root "$qrent_root" \
+.venv/bin/python -u "$qrent_validator" --root "$qrent_root" \
     --capture-result="$qrent_report" --capture-lock-fd 9 \
     2>&1 | tee -a "$qrent_root/logs/school-$(date +%Y%m%d).log" || qrent_status=$?
 [[ "$qrent_status" == 2 ]] && exit 1

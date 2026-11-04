@@ -135,7 +135,8 @@ class DomainScraper(BaseScraper):
                 time.sleep(self.config.request_delay)
             
         except Exception as e:
-            self.last_run_error = type(e).__name__
+            self.last_run_error = ('HTTP403' if getattr(self.browser,'_navigation_status',None)==403
+                                   else type(e).__name__)
             logger.error(f"Domain 爬取失败: {e}")
             import traceback
             traceback.print_exc()
@@ -356,6 +357,7 @@ class DomainScraper(BaseScraper):
             return properties
         
         logger.info(f"开始爬取 {len(to_scrape)} 个房产的详情页")
+        self.last_run_error = None
         
         try:
             if not self.browser:
@@ -376,6 +378,9 @@ class DomainScraper(BaseScraper):
                     
                     if not self.browser.navigate(url, wait_time=3.0):
                         logger.warning("Domain detail navigation failed: %s", prop.house_id)
+                        if getattr(self.browser,'_navigation_status',None)==403:
+                            self.last_run_error='HTTP403'
+                            break
                         continue
                     
                     # Public JSON detail props need no HTML navigation, scroll

@@ -152,7 +152,13 @@ def capture(args, factories=None):
                     continue
             source_areas = (capture_areas(args.cities, source)
                             if getattr(args, 'school_scope', False) and not args.areas else areas)
+            source_denied = False
             for area in source_areas:
+                if source_denied:
+                    result['areas'].append({'source':source,'area':area,'count':0,'reused':0,
+                                            'attempts':0,'error':'HTTP403SourcePaused'})
+                    result['errors'].append({'source':source,'area':area,'error':'HTTP403SourcePaused'})
+                    continue
                 if budget.exhausted:
                     result["errors"].append({"source": source, "area": area, "error": "Budget reached"})
                     break
@@ -206,6 +212,8 @@ def capture(args, factories=None):
                         if not args.no_details and details:
                             result["detail_requests"] += len(details)
                             scraper.scrape_property_details(details, skip_existing=True)
+                            if source=='domain' and getattr(scraper,'last_run_error',None)=='HTTP403':
+                                source_denied=True
                             failed = sum(not prop.description_en for prop in details)
                             result["details_failed"] += failed
                             if failed:
@@ -230,6 +238,12 @@ def capture(args, factories=None):
                         break
                     except Exception as exc:
                         logger.error("%s %s attempt %s failed: %s", source, area, attempt + 1, type(exc).__name__)
+                        if source=='domain' and getattr(scraper,'last_run_error',None)=='HTTP403':
+                            source_denied=True
+                            item['error']='HTTP403'
+                            result['errors'].append({'source':source,'area':area,'error':'HTTP403'})
+                            logger.warning('Domain access denied; remaining source queries paused for this run')
+                            break
                         if attempt == args.retries or budget.exhausted:
                             item["error"] = type(exc).__name__
                             result["errors"].append({"source": source, "area": area, "error": item["error"]})

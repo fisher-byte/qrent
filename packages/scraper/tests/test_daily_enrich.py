@@ -153,14 +153,14 @@ class DailyEnrichmentTests(unittest.TestCase):
             full_report['areas'][0]['count']=30
             save_frozen(capture,full_report)
             output=root/'out';env=root/'writer.env'
-            priority=MagicMock(return_value={})
+            priority=MagicMock(return_value=({},{}))
             with patch.object(prepare,'__file__',str(source)),patch.object(prepare,'published_source_priority',priority):
                 first=prepare.prepare(root/'properties.db',capture,output,env)
                 records=json.loads((output/'input.json').read_text())
                 save_frozen(output/'queue/batch-0001/receipt.json',{'status':'processed',
                     'published_ids':[[p['source'],p['house_id']] for p in records[:50]],'held_ids':[]})
                 before={p:p.read_bytes() for p in output.rglob('*.json')}
-                priority.return_value={(p['source'],p['house_id']):71+i for i,p in enumerate(records[:50])}
+                priority.return_value=({(p['source'],p['house_id']):71+i for i,p in enumerate(records[:50])},{})
                 resumed=prepare.prepare(root/'properties.db',capture,output,env)
                 self.assertEqual(priority.call_count,1)
                 self.assertEqual(resumed['eligible_addresses'],first['eligible_addresses'])

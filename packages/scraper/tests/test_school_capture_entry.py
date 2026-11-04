@@ -1,5 +1,6 @@
 """Execute the daily shell entry with offline child programs and the real root contract."""
 import os
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -22,7 +23,7 @@ class SchoolCaptureEntryTests(unittest.TestCase):
 from pathlib import Path
 args=sys.argv[1:];root=Path(os.environ['QRENT_ROOT'])
 if args[0]=='-c': print('20261031_020005_264602');sys.exit(0)
-assert 'ops/recover_school_capture.py' in args
+assert any(name in args for name in ('ops/recover_school_capture.py','ops/publishable_capture.py'))
 assert args[args.index('--capture-lock-fd')+1]=='9'
 assert os.fstat(9).st_ino==(root/'.capture.lock').stat().st_ino
 with (root/'children.jsonl').open('a') as stream:stream.write(json.dumps(args)+'\\n')
@@ -70,6 +71,15 @@ exit "$status"
         self.assertFalse((self.root/'enrichment-started').exists(), result.stderr)
         self.assertNotEqual(result.returncode,0)
         self.assertFalse((self.root/'children.jsonl').exists())
+
+    def test_partial_scheduled_capture_publishes_verified_records_without_auto_recapture(self):
+        self.env['TEST_BASE_EXIT']='1'
+        result=self.invoke()
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertTrue((self.root/'enrichment-started').exists())
+        children=[json.loads(line) for line in (self.root/'children.jsonl').read_text().splitlines()]
+        self.assertEqual(len(children),1)
+        self.assertIn('ops/publishable_capture.py',children[0])
 
     def test_recovery_only_does_not_launch_the_full_capture(self):
         self.env['TEST_BASE_EXIT'] = '97'

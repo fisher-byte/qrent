@@ -16,7 +16,8 @@ from dotenv import dotenv_values
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from ops.enrichment_queue import write_json
-from ops.recover_school_capture import select_complete_capture
+from ops.publishable_capture import capture_summary,select_publishable_capture,validate_publishable_capture
+from ops.recover_school_capture import campaign_root
 from src.services.enrichment_state import EnrichmentState
 
 
@@ -36,11 +37,13 @@ def model_authorized(root,release):
     except (OSError,ValueError,sqlite3.Error):return False
 
 
-def run_daily(root,now=None):
+def run_daily(root,now=None,capture_path=None):
     root=Path(root).resolve();release=root/'releases/recovery-20261027'
     today=(now or datetime.now(ZoneInfo('Asia/Shanghai'))).strftime('%Y%m%d')
-    capture_path=select_complete_capture(root/'output'/('school-daily-'+today))
-    capture=json.loads(capture_path.read_text())
+    capture_path=Path(capture_path) if capture_path else select_publishable_capture(root/'output'/('school-daily-'+today))
+    capture=validate_publishable_capture(capture_path)
+    if campaign_root(capture_path.parent/(capture['run']+'_result.json'))!=root:
+        raise ValueError('Daily publication requires the original crawler root')
     output=root/'output'/('school-enrichment-'+capture['run'])
     environment=dict(os.environ,SCRAPER_ENV_FILE=str(release/'.env'))
     while not (root/'enrichment/bootstrap-first-pass.json').exists():
@@ -65,6 +68,7 @@ def run_daily(root,now=None):
     result=json.loads((output/'queue/result.json').read_text())
     receipt={'status':'processed' if not result['held_addresses'] else 'processed_with_held_records',
         'capture_run':capture['run'],'capture_status':capture['status'],
+        **capture_summary(capture),
         'addresses':result['addresses'],'published_addresses':result['published_addresses'],
         'held_addresses':result['held_addresses'],'models_enabled':model_enabled,'bonus_enabled':bonus_enabled,
         'cash_commute_usd':0,'completed_at':datetime.now(ZoneInfo('Asia/Shanghai')).isoformat()}
@@ -75,5 +79,6 @@ def run_daily(root,now=None):
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root',type=Path,default=Path('/root/qrent-scraper'))
+    parser.add_argument('--capture-result',type=Path)
     args=parser.parse_args()
-    print(json.dumps(run_daily(args.root)))
+    print(json.dumps(run_daily(args.root,capture_path=args.capture_result)))
