@@ -51,6 +51,22 @@ class PartialCaptureTests(unittest.TestCase):
             self.assertEqual(summary['unattempted_queries'],19)
             self.assertFalse(summary['capture_window_complete'])
 
+    def test_paused_domain_queries_are_unattempted_after_access_denial(self):
+        domain_areas=[a['area'] for a in report()['areas'] if a['source']=='domain']
+        data=report(failed=domain_areas)
+        for item,error in zip(data['areas'][:len(domain_areas)],data['errors'],strict=True):
+            cause='HTTP403' if item['area']==domain_areas[0] else 'HTTP403SourcePaused'
+            item.update(error=cause,attempts=int(cause=='HTTP403'))
+            error['error']=cause
+        with tempfile.TemporaryDirectory() as temp:
+            path=self.original(Path(temp).resolve(),data)
+            actual=self.module().validate_publishable_capture(path)
+            summary=self.module().capture_summary(actual)
+        self.assertEqual(summary['successful_queries'],19)
+        self.assertEqual(summary['failed_queries'],1)
+        self.assertEqual(summary['unattempted_queries'],21)
+        self.assertFalse(summary['capture_window_complete'])
+
     def test_foreign_query_and_unproven_school_identity_are_rejected(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp).resolve()

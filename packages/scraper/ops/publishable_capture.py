@@ -46,13 +46,13 @@ def validate_publishable_capture(path):
 
 
 def capture_summary(data):
-    areas=data.get('areas',[])
-    actual={(item['source'],item['area']) for item in areas}
-    successful=sum(not item.get('error') for item in areas)
-    missing=len(set(queries())-actual)
-    return {'capture_window_complete':data['status']=='success' and not missing,
-            'successful_queries':successful,'failed_queries':len(areas)-successful,
-            'unattempted_queries':missing,
+    attempted=[item for item in data.get('areas',[]) if item.get('attempts')!=0]
+    actual={(item['source'],item['area']) for item in attempted}
+    successful=sum(not item.get('error') for item in attempted)
+    unattempted=len(set(queries())-actual)
+    return {'capture_window_complete':data['status']=='success' and not unattempted,
+            'successful_queries':successful,'failed_queries':len(attempted)-successful,
+            'unattempted_queries':unattempted,
             'captured_source_counts':{source:sum(s==source for s,_ in data['captured_source_ids'])
                                       for source in ('domain','realestate')}}
 
