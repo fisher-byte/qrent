@@ -18,6 +18,9 @@ class SchoolCaptureEntryTests(unittest.TestCase):
         self.release = self.root/'releases/recovery-20261027'
         (self.release/'.venv/bin').mkdir(parents=True)
         self.bin = self.root/'bin'; self.bin.mkdir()
+        df = self.bin/'df'
+        df.write_text('#!/usr/bin/env bash\nprintf "Filesystem 1024-blocks Used Available Capacity Mounted-on\\n/test 4000000 1902848 2097152 48%% /\\n"\n')
+        df.chmod(0o700)
         python = self.release/'.venv/bin/python'
         python.write_text('#!'+sys.executable+'''\nimport json,os,sys
 from pathlib import Path
