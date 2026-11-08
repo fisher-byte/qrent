@@ -9,7 +9,7 @@ exec 9>"$qrent_root/.capture.lock"
 flock -n 9 || exit 75
 cd "$qrent_release"
 export SCRAPER_ENV_FILE="$qrent_release/.env"
-if [[ $# == 0 || ( $# == 2 && "$1" == --recover-only ) ]]; then
+if [[ $# == 0 || ( $# == 1 && "$1" == --disk-check ) || ( $# == 2 && "$1" == --recover-only ) ]]; then
     qrent_free_kib=$(df -Pk "$qrent_root" | awk 'END {print $4}') || qrent_free_kib=
     qrent_disk_state=available
     qrent_free_bytes=0
@@ -23,6 +23,7 @@ if [[ $# == 0 || ( $# == 2 && "$1" == --recover-only ) ]]; then
     printf '{"at":"%s","stage":"capture_preflight","status":"%s","available_bytes":%d,"minimum_bytes":402653184,"warning_bytes":1073741824}\n' \
         "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$qrent_disk_state" "$qrent_free_bytes" | tee -a "$qrent_root/logs/disk-health.jsonl"
     [[ "$qrent_disk_state" == available || "$qrent_disk_state" == low_space_warning ]] || exit 74
+    if [[ $# == 1 ]]; then exit 0; fi
 fi
 # Both a full scheduled run and explicit recovery retain the original lock.
 if [[ $# == 2 && "$1" == --recover-only ]]; then
@@ -48,7 +49,7 @@ elif [[ $# == 0 ]]; then
     [[ "$qrent_status" == 2 ]] && exit 1
     [[ "$qrent_status" == 0 || "$qrent_status" == 1 ]] || exit "$qrent_status"
 else
-    echo 'Use the fixed scheduled window, --publish-only or --recover-only ORIGINAL_REPORT' >&2
+    echo 'Use the fixed scheduled window, --disk-check, --publish-only or --recover-only ORIGINAL_REPORT' >&2
     exit 64
 fi
 # Verify actual identities; partial query coverage no longer blocks valid rows.

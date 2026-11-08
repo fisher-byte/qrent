@@ -105,5 +105,18 @@ exit "$status"
         self.assertEqual(receipt['status'], 'blocked_low_space')
         self.assertEqual(receipt['available_bytes'], 200000 * 1024)
 
+    def test_disk_check_records_warning_without_launching_capture_or_validator(self):
+        df = self.bin/'df'
+        df.write_text('#!/usr/bin/env bash\nprintf "Filesystem 1024-blocks Used Available Capacity Mounted-on\\n/test 3000000 2400000 600000 80%% /\\n"\n')
+        df.chmod(0o700)
+        timeout = self.bin/'timeout'
+        timeout.write_text('#!/usr/bin/env bash\nexit 97\n')
+        result = subprocess.run(['bash', str(ENTRY), '--disk-check'], env=self.env,
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.root/'children.jsonl').exists())
+        receipt = json.loads((self.root/'logs/disk-health.jsonl').read_text())
+        self.assertEqual(receipt['status'], 'low_space_warning')
+
 
 if __name__ == '__main__': unittest.main()
