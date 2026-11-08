@@ -1,4 +1,6 @@
 import gzip
+import json
+import os
 from pathlib import Path
 import sqlite3
 import stat
@@ -6,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -136,6 +139,89 @@ class BackupSqliteTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(self.database.exists())
         self.assertEqual(list(self.directory.iterdir()), [])
+
+    def test_staged_gzip_replaces_only_after_verified_copy_and_preserves_wal(self):
+        self.database_with_wal()
+        staging = self.root / 'staging'
+        staging.mkdir()
+        with patch.object(backup_sqlite, 'available_memory_bytes', return_value=2 * 1024**3):
+            target = backup_sqlite.backup_database(self.database, self.directory, compress=True,
+                                                   staging_directory=staging, reserve_bytes=0)
+        restored = self.root / 'restored-staged.db'
+        restored.write_bytes(gzip.decompress(target.read_bytes()))
+        self.assert_database(restored)
+        self.assertEqual(list(staging.iterdir()), [])
+        self.assertEqual(list(self.directory.iterdir()), [target])
+
+    def test_insufficient_staging_memory_keeps_previous_verified_archive(self):
+        self.database_with_wal()
+        target = backup_sqlite.backup_database(self.database, self.directory, compress=True)
+        previous = target.read_bytes()
+        staging = self.root / 'staging'
+        staging.mkdir()
+        with patch.object(backup_sqlite, 'available_memory_bytes', return_value=0):
+            with self.assertRaisesRegex(OSError, 'staging memory'):
+                backup_sqlite.backup_database(self.database, self.directory, compress=True,
+                                              staging_directory=staging, reserve_bytes=0)
+        self.assertEqual(target.read_bytes(), previous)
+        self.assertEqual(list(staging.iterdir()), [])
+
+    def test_insufficient_destination_space_keeps_previous_archive_and_cleans_staging(self):
+        self.database_with_wal()
+        target = backup_sqlite.backup_database(self.database, self.directory, compress=True)
+        previous = target.read_bytes()
+        staging = self.root / 'staging'
+        staging.mkdir()
+
+        def available(path):
+            return SimpleNamespace(free=0 if Path(path) == self.directory else 2 * 1024**3)
+
+        with patch.object(backup_sqlite, 'available_memory_bytes', return_value=2 * 1024**3), \
+                patch.object(backup_sqlite.shutil, 'disk_usage', side_effect=available):
+            with self.assertRaisesRegex(OSError, 'backup destination space'):
+                backup_sqlite.backup_database(self.database, self.directory, compress=True,
+                                              staging_directory=staging)
+        self.assertEqual(target.read_bytes(), previous)
+        self.assertEqual(list(staging.iterdir()), [])
+        self.assertEqual(list(self.directory.iterdir()), [target])
+
+    def test_unverified_backup_records_failure_and_cannot_rotate_previous_archive(self):
+        writer = self.database_with_wal()
+        target = backup_sqlite.backup_database(self.database, self.directory, compress=True)
+        previous = target.read_bytes()
+        old = self.directory / 'properties_20200101.db.gz'
+        old.write_bytes(previous)
+        os.utime(old, (1, 1))
+        writer.execute('PRAGMA ignore_check_constraints=ON')
+        writer.execute("INSERT INTO records(payload) VALUES ('')")
+        writer.commit()
+        receipts = self.root / 'receipts'
+        result = self.run_cli('--gzip', '--receipt-directory', str(receipts), '--retain-days', '30')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(target.read_bytes(), previous)
+        self.assertEqual(old.read_bytes(), previous)
+        receipt = json.loads(next(receipts.glob('*.json')).read_text())
+        self.assertEqual(receipt['status'], 'backup_failed')
+        self.assertIn('quick_check', receipt['error'])
+
+    def test_verified_receipt_rotates_only_expired_named_snapshots(self):
+        self.database_with_wal()
+        target = backup_sqlite.backup_database(self.database, self.directory, compress=True)
+        expired = self.directory / 'properties_20200101.db.gz'
+        archived = self.directory / 'recovery-original.db.gz'
+        for path in (expired, archived):
+            path.write_bytes(target.read_bytes())
+            os.utime(path, (1, 1))
+        receipts = self.root / 'receipts'
+        result = self.run_cli('--gzip', '--receipt-directory', str(receipts), '--retain-days', '30')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(expired.exists())
+        self.assertTrue(archived.exists())
+        receipt = json.loads(next(receipts.glob('*.json')).read_text())
+        self.assertEqual(receipt['status'], 'backup_verified')
+        self.assertEqual(receipt['quick_check'], 'ok')
+        self.assertTrue(receipt['gzip_payload_verified'])
+        self.assertEqual(receipt['rotated'], [expired.name])
 
 
 if __name__ == '__main__':

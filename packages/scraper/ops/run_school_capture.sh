@@ -9,6 +9,21 @@ exec 9>"$qrent_root/.capture.lock"
 flock -n 9 || exit 75
 cd "$qrent_release"
 export SCRAPER_ENV_FILE="$qrent_release/.env"
+if [[ $# == 0 || ( $# == 2 && "$1" == --recover-only ) ]]; then
+    qrent_free_kib=$(df -Pk "$qrent_root" | awk 'END {print $4}') || qrent_free_kib=
+    qrent_disk_state=available
+    qrent_free_bytes=0
+    if [[ "$qrent_free_kib" =~ ^[0-9]+$ ]]; then
+        qrent_free_bytes=$((qrent_free_kib * 1024))
+        (( qrent_free_bytes >= 1073741824 )) || qrent_disk_state=low_space_warning
+        (( qrent_free_bytes >= 402653184 )) || qrent_disk_state=blocked_low_space
+    else
+        qrent_disk_state=disk_probe_failed
+    fi
+    printf '{"at":"%s","stage":"capture_preflight","status":"%s","available_bytes":%d,"minimum_bytes":402653184,"warning_bytes":1073741824}\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$qrent_disk_state" "$qrent_free_bytes" | tee -a "$qrent_root/logs/disk-health.jsonl"
+    [[ "$qrent_disk_state" == available || "$qrent_disk_state" == low_space_warning ]] || exit 74
+fi
 # Both a full scheduled run and explicit recovery retain the original lock.
 if [[ $# == 2 && "$1" == --recover-only ]]; then
     qrent_report=$2

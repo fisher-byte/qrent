@@ -93,5 +93,17 @@ exit "$status"
         self.assertFalse((self.root/'enrichment-started').exists())
         self.assertFalse((self.root/'children.jsonl').exists())
 
+    def test_low_disk_refuses_scheduled_capture_and_leaves_a_daily_receipt(self):
+        df = self.bin/'df'
+        df.write_text('#!/usr/bin/env bash\nprintf "Filesystem 1024-blocks Used Available Capacity Mounted-on\\n/test 3000000 2800000 200000 94%% /\\n"\n')
+        df.chmod(0o700)
+        result = self.invoke()
+        self.assertEqual(result.returncode, 74, result.stderr)
+        self.assertFalse((self.root/'enrichment-started').exists())
+        self.assertFalse((self.root/'children.jsonl').exists())
+        receipt = json.loads((self.root/'logs/disk-health.jsonl').read_text())
+        self.assertEqual(receipt['status'], 'blocked_low_space')
+        self.assertEqual(receipt['available_bytes'], 200000 * 1024)
+
 
 if __name__ == '__main__': unittest.main()
