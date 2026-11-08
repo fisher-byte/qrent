@@ -330,8 +330,8 @@ def verify_destination(root, run, manifest_sha):
     return receipt
 
 
-def ssh_command(target, action, run, manifest_sha):
-    arguments = ('/usr/bin/python3.11', '-c', Path(__file__).read_text(), action, run, manifest_sha)
+def ssh_command(target, action, run, manifest_sha, script=None):
+    arguments = ('/usr/bin/python3.11', '-c', script or Path(__file__).read_text(), action, run, manifest_sha)
     return ['/usr/bin/ssh', '-T', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'UpdateHostKeys=no',
             '-o', 'ClearAllForwardings=yes', '-o', 'IdentityAgent=none', '-o', 'ControlPath=none',
             '-o', 'ConnectTimeout=10', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=2',
@@ -348,14 +348,16 @@ def send_tar(base, manifest, stream):
                 archive.addfile(entry, source)
 
 
-def remote(target, action, run, manifest_sha, *, base=None, manifest=None):
+def remote(target, action, run, manifest_sha, *, base=None, manifest=None, script=None, send=None):
     with tempfile.TemporaryFile() as output:
-        command = ssh_command(target, action, run, manifest_sha)
+        command = ssh_command(target, action, run, manifest_sha, script)
         with subprocess.Popen(command, stdin=subprocess.PIPE, stdout=output, stderr=subprocess.DEVNULL) as process:
             try:
                 try:
                     with process.stdin as stream:
-                        if manifest is not None:
+                        if send is not None:
+                            send(stream)
+                        elif manifest is not None:
                             send_tar(base, manifest, stream)
                 except BrokenPipeError:
                     pass  # Read the receiver's error receipt.
@@ -370,6 +372,18 @@ def remote(target, action, run, manifest_sha, *, base=None, manifest=None):
             require(process.returncode == 0 and result.get('status') != 'failed',
                     result.get('error', 'Cold archive SSH failed'))
     return result
+
+
+def read_target(root):
+    configuration = root / 'cold-archive.json'
+    require(private_path(configuration, 0o600), 'Cold archive SSH configuration is not private')
+    target = read_json(configuration)['ssh_target']
+    require(re.fullmatch(r'[A-Za-z0-9_.-]+@[A-Za-z0-9_.:-]+', target), 'Invalid configured cold archive SSH target')
+    return target
+
+
+def interrupted(_signal, _frame):
+    raise ArchiveError('Cold archive interrupted')
 
 
 def release_hot(root, base, manifest, remote_receipt, manifest_sha):
@@ -439,10 +453,7 @@ def archive_once(root, apply, report):
         total = validate_manifest(manifest, run)
         if not apply:
             return {'status': 'candidate_verified', 'verified_files': len(manifest['files']), 'candidate_bytes': total}
-        configuration = root / 'cold-archive.json'
-        require(private_path(configuration, 0o600), 'Cold archive SSH configuration is not private')
-        target = read_json(configuration)['ssh_target']
-        require(re.fullmatch(r'[A-Za-z0-9_.-]+@[A-Za-z0-9_.:-]+', target), 'Invalid configured cold archive SSH target')
+        target = read_target(root)
         data = canonical(manifest) + b'\n'
         require(len(data) <= MAX_MANIFEST_BYTES, 'Cold archive manifest exceeds the transfer cap')
         manifest_sha = hashlib.sha256(data).hexdigest()
@@ -478,8 +489,6 @@ def main():
         root = args.root.resolve()
         started = now()
         report = {'started_at': started.isoformat(), 'apply': args.apply}
-        def interrupted(_signal, _frame):
-            raise ArchiveError('Cold archive interrupted')
         signal.signal(signal.SIGTERM, interrupted)
         try:
             report.update(archive_once(root, args.apply, report))
