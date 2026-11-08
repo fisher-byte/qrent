@@ -1,3 +1,4 @@
+import os
 import sys
 import tempfile
 import unittest
@@ -60,6 +61,52 @@ class RunnerTests(unittest.TestCase):
             capture(args,factories={'domain':Domain})
             self.assertEqual(observed,[False,True])
             self.assertTrue(all(not path.exists() for path in paths))
+
+    def test_dedicated_domain_profile_survives_retry_and_temporary_profile_cleanup(self):
+        from recovery_runner import build_parser, capture
+        domain_profiles, realestate_profiles = [], []
+
+        class Domain:
+            browser = None
+
+            def __init__(self, profile_dir, **kwargs):
+                self.path = Path(profile_dir)
+                domain_profiles.append(self.path)
+
+            def scrape_area(self, area):
+                if (self.path / 'session-marker').read_text() != 'verified crawler session':
+                    raise AssertionError('Dedicated session changed')
+                if len(domain_profiles) == 1:
+                    raise RuntimeError('Interrupted first attempt')
+                return [listing()]
+
+        class RealEstate:
+            browser = None
+
+            def __init__(self, profile_dir, **kwargs):
+                self.path = Path(profile_dir)
+                self.path.mkdir(parents=True)
+                realestate_profiles.append(self.path)
+
+            def scrape_area(self, area):
+                return [listing(PropertySource.REALESTATE, house_id='456')]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            profile = root / 'domain-chrome'
+            profile.mkdir(mode=0o700)
+            marker = profile / 'session-marker'
+            marker.write_text('verified crawler session')
+            args = build_parser().parse_args(['--areas', 'newtown-nsw-2042', '--no-details', '--retries', '1',
+                '--skip-proxy-check', '--db', str(root / 'p.db'), '--output', str(root / 'capture'),
+                '--domain-profile', str(profile)])
+            with patch.dict(os.environ, {'DOMAIN_SEARCH_TRANSPORT': 'html-then-json'}):
+                result = capture(args, factories={'domain': Domain, 'realestate': RealEstate})
+            self.assertEqual(result['status'], 'success')
+            self.assertEqual(domain_profiles, [profile, profile])
+            self.assertEqual(marker.read_text(), 'verified crawler session')
+            self.assertEqual(len(realestate_profiles), 1)
+            self.assertFalse(realestate_profiles[0].exists())
 
     def test_school_capture_keeps_query_cohort_for_adjacent_results_before_id_deduplication(self):
         from recovery_runner import build_parser, capture

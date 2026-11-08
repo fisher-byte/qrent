@@ -25,6 +25,7 @@ elif [[ $# == 0 ]]; then
     timeout --kill-after=30s 3h xvfb-run -a .venv/bin/python -u recovery_runner.py \
         --run-tag "$qrent_run" --school-scope --cities sydney --scrapers domain realestate \
         --pages 7 --limit 2000 --detail-limit 100 --details-per-area 10 --retries 1 \
+        --domain-profile "$qrent_root/browser-state/domain-chrome" \
         --max-requests 40000 --proxy-bytes 150000000 --db "$qrent_root/properties.db" \
         --output "$qrent_output" \
         2>&1 | tee -a "$qrent_root/logs/school-$(date +%Y%m%d).log" || qrent_status=$?

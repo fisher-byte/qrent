@@ -69,6 +69,8 @@ def build_parser():
     parser.add_argument("--proxy-bytes", type=positive, default=int(os.getenv("SCRAPER_MAX_PROXY_BYTES", "30000000")))
     parser.add_argument("--skip-proxy-check", action="store_true", help="Use only with a previously verified AU session")
     parser.add_argument("--keep-profiles", action="store_true", help="Retain temporary browser profiles for diagnosis")
+    parser.add_argument('--domain-profile', type=Path,
+                        help='Private Domain profile for HTML-first capture under the capture lock')
     parser.add_argument("--school-scope", action="store_true", help="Original Sydney university areas and historical VIC campus cohorts")
     return parser
 
@@ -152,6 +154,9 @@ def capture(args, factories=None):
                     continue
             source_areas = (capture_areas(args.cities, source)
                             if getattr(args, 'school_scope', False) and not args.areas else areas)
+            dedicated_profile = (getattr(args, 'domain_profile', None)
+                                 if source == 'domain' and os.getenv('DOMAIN_SEARCH_TRANSPORT') == 'html-then-json'
+                                 else None)
             source_denied = False
             for area in source_areas:
                 if source_denied:
@@ -167,14 +172,18 @@ def capture(args, factories=None):
                 for attempt in range(args.retries + 1):
                     item["attempts"] += 1
                     if attempt:
-                        if not args.keep_profiles:
+                        if not args.keep_profiles and dedicated_profile is None:
                             shutil.rmtree(args.output / 'profiles' / f"{source}-{os.environ['PROXY_SESSION']}",
                                           ignore_errors=True)
                         os.environ["PROXY_SESSION"] = uuid.uuid4().hex[:12]
-                    profile = args.output / 'profiles' / f"{source}-{os.environ['PROXY_SESSION']}"
-                    owned_profiles.add(profile)
+                    profile = dedicated_profile or args.output / 'profiles' / f"{source}-{os.environ['PROXY_SESSION']}"
+                    if dedicated_profile is None:
+                        owned_profiles.add(profile)
                     scraper = None
                     try:
+                        if dedicated_profile is not None and (not profile.is_absolute() or profile.resolve() != profile
+                                or not profile.is_dir() or profile.stat().st_mode & 0o077):
+                            raise ValueError('Domain profile must be an existing private directory without symlinks')
                         if source == 'realestate' and not args.skip_proxy_check and (
                                 verified_session != os.environ['PROXY_SESSION'] or time.monotonic() - verified_at > 300):
                             verified = verify_au_proxy(source, budget, include_ip=True)

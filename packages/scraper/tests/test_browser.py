@@ -59,6 +59,58 @@ class BrowserTests(unittest.TestCase):
             self.assertTrue(browser.navigate(url,wait_time=0))
             public.assert_called_once_with(url);page.goto.assert_not_called()
 
+    def test_domain_search_postcode_does_not_select_json_detail_transport(self):
+        browser = BrowserManager(browser_type=BrowserType.PLAYWRIGHT, source='domain')
+        page = MagicMock()
+        page.goto.return_value.status = 200
+        browser._playwright_page = page
+        url = 'https://www.domain.com.au/rent/newtown-nsw-2042/?excludedeposittaken=1&page=2'
+        with patch.dict(os.environ, {'DOMAIN_SEARCH_TRANSPORT': 'html', 'DOMAIN_DETAIL_TRANSPORT': 'json'}):
+            self.assertTrue(browser.navigate(url, wait_time=0))
+        page.goto.assert_called_once_with(url, timeout=60000, wait_until='domcontentloaded')
+
+    def test_domain_html_then_json_waits_for_first_search_document(self):
+        browser = BrowserManager(browser_type=BrowserType.PLAYWRIGHT, source='domain')
+        page = MagicMock()
+        first = 'https://www.domain.com.au/rent/newtown-nsw-2042/?excludedeposittaken=1'
+        second = first + '&page=2'
+        detail = 'https://www.domain.com.au/2-example-street-newtown-nsw-2042-18408242'
+        page.url = first
+        page.goto.return_value.status = 200
+        browser._playwright_page = page
+        browser.network_policy = MagicMock(proxied=False)
+        browser.network_policy.budget.exhausted = False
+        with patch.dict(os.environ, {'DOMAIN_SEARCH_TRANSPORT': 'html-then-json',
+                                     'DOMAIN_DETAIL_TRANSPORT': 'json', 'DOMAIN_NATIVE_NETWORK': 'true'}), \
+                patch.object(browser, '_fetch_domain_search', return_value=True) as fetch:
+            self.assertFalse(browser.navigate(second, wait_time=0))
+            self.assertFalse(browser.navigate(detail, wait_time=0))
+            fetch.assert_not_called()
+            page.goto.assert_not_called()
+            self.assertTrue(browser.navigate(first, wait_time=0))
+            self.assertTrue(browser.navigate(second, wait_time=0))
+            self.assertTrue(browser.navigate(detail, wait_time=0))
+            self.assertEqual([call.args for call in fetch.call_args_list], [(second,), (detail,)])
+            page.goto.assert_called_once_with(first, timeout=60000, wait_until='domcontentloaded')
+            page.wait_for_selector.assert_called_once()
+
+    def test_domain_html_then_json_stops_after_rejected_first_document(self):
+        browser = BrowserManager(browser_type=BrowserType.PLAYWRIGHT, source='domain')
+        page = MagicMock()
+        first = 'https://www.domain.com.au/rent/newtown-nsw-2042/?excludedeposittaken=1'
+        page.url = first
+        page.goto.return_value.status = 403
+        browser._playwright_page = page
+        browser.network_policy = MagicMock(proxied=False)
+        browser.network_policy.budget.exhausted = False
+        with patch.dict(os.environ, {'DOMAIN_SEARCH_TRANSPORT': 'html-then-json',
+                                     'DOMAIN_NATIVE_NETWORK': 'true'}), \
+                patch.object(browser, '_fetch_domain_search') as fetch:
+            self.assertFalse(browser.navigate(first, wait_time=0))
+            self.assertFalse(browser.navigate(first + '&page=2', wait_time=0))
+            fetch.assert_not_called()
+            page.goto.assert_called_once()
+
     def test_realestate_fixed_preset_keeps_verified_au_geoip_and_metered_routing(self):
         from camoufox import DefaultAddons
         context = MagicMock()

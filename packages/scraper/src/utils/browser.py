@@ -13,7 +13,7 @@ import ipaddress
 import re
 import platform
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 from typing import Optional
 from contextlib import contextmanager
 from enum import Enum
@@ -70,6 +70,7 @@ class BrowserManager:
         self.egress_proxy = None
         self._search_payload = None
         self._domain_home_ready = False
+        self._domain_search_primed = False
     
     def create_driver(self):
         """创建并配置浏览器"""
@@ -332,6 +333,8 @@ class BrowserManager:
                 self._playwright_page = None
                 self._playwright_context = None
                 self._playwright = None
+                self._domain_home_ready = False
+                self._domain_search_primed = False
         else:
             if self.driver:
                 try:
@@ -359,9 +362,22 @@ class BrowserManager:
                 page = self.get_driver()
                 self._navigation_status = None
                 target = urlsplit(url)
+                is_search_path = target.path.startswith('/rent/')
+                search_transport = os.getenv('DOMAIN_SEARCH_TRANSPORT')
+                hybrid = self.source == 'domain' and search_transport == 'html-then-json'
+                first_hybrid_page = (hybrid and is_search_path
+                                     and parse_qs(target.query).get('page', ['1']) == ['1'])
+                if first_hybrid_page:
+                    self._domain_search_primed = False
+                    self._domain_home_ready = False
+                    self._require_domain_native(target)
                 if (self.source == 'domain' and
-                        ((os.getenv('DOMAIN_SEARCH_TRANSPORT')=='json' and target.path.startswith('/rent/')) or
-                         (os.getenv('DOMAIN_DETAIL_TRANSPORT')=='json' and re.search(r'-\d+/?$',target.path)))):
+                        ((is_search_path and (search_transport == 'json' or (hybrid and not first_hybrid_page))) or
+                         (not is_search_path and os.getenv('DOMAIN_DETAIL_TRANSPORT') == 'json'
+                          and re.search(r'-\d+/?$', target.path)))):
+                    if hybrid and not self._domain_search_primed:
+                        logger.warning('Domain JSON requires a successful first HTML search page')
+                        return False
                     return self._fetch_domain_search(url)
                 # RealEstate.com.au 等站点可能持续加载资源导致 "load" 事件迟迟不触发，
                 # 使用 domcontentloaded 可显著降低 page.goto 超时概率。
@@ -389,6 +405,15 @@ class BrowserManager:
                 if status >= 400:
                     logger.error("HTTP %s after automatic navigation loading %s", status, url)
                     return False
+                if first_hybrid_page:
+                    # The site can return a 200 verification page before rendering any listings.
+                    page.wait_for_selector('li[data-testid^="listing-"]', state='attached', timeout=12000)
+                    landed = urlsplit(page.url)
+                    self._domain_search_primed = ((self._navigation_status or status) == 200
+                        and landed.scheme == 'https' and landed.netloc == 'www.domain.com.au'
+                        and landed.path.startswith('/rent/'))
+                    if not self._domain_search_primed:
+                        return False
                 if self.network_policy and self.network_policy.budget.exhausted:
                     logger.error("Network budget reached")
                     return False
@@ -404,13 +429,15 @@ class BrowserManager:
             logger.error(f"Navigation failed: {url}, error: {e}")
             return False
 
-    def _fetch_domain_search(self, url):
-        """Use Domain's public GET search format in its own ordinary browser session."""
-        target = urlsplit(url)
+    def _require_domain_native(self, target):
         if (target.scheme != 'https' or target.netloc != 'www.domain.com.au'
                 or not self.network_policy or self.network_policy.proxied
                 or os.getenv('DOMAIN_NATIVE_NETWORK', '').lower() != 'true'):
-            raise ValueError('Domain JSON search requires its ordinary native browser network')
+            raise ValueError('Domain requests require its ordinary native browser network')
+
+    def _fetch_domain_search(self, url):
+        """Use Domain's public GET search format in its own ordinary browser session."""
+        self._require_domain_native(urlsplit(url))
         if self.network_policy.budget.exhausted:
             return False
         page = self.get_driver()
