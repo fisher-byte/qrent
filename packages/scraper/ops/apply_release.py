@@ -26,7 +26,8 @@ def offline_test_environment(path):
     values.update(COMMUTE_PROVIDER='google',QWEN_MODEL='qwen-plus',
                   DASHSCOPE_HTTP_BASE_URL='https://dashscope.aliyuncs.com/api/v1',
                   CAMOUFOX_ASSET_PREFLIGHT='false',DOMAIN_BROWSER_PROXY='',
-                  DOMAIN_PROXY_IP='',DOMAIN_SEARCH_TRANSPORT='',DOMAIN_DETAIL_TRANSPORT='')
+                  DOMAIN_PROXY_IP='',DOMAIN_SEARCH_TRANSPORT='',DOMAIN_DETAIL_TRANSPORT='',
+                  DOMAIN_HOME_BOOTSTRAP='')
     path.write_text('\n'.join(k+'='+v for k,v in values.items())+'\n')
     return dict(os.environ,SCRAPER_ENV_FILE=str(path),**values)
 
