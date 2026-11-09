@@ -47,7 +47,7 @@ class DomainScraper(BaseScraper):
         'available_date': 'ul[data-testid="listing-summary-strip"]',
     }
     
-    def __init__(self, config: ScraperConfig = None, profile_dir: str = None):
+    def __init__(self, config: ScraperConfig = None, profile_dir: str = None, *, retain_session: bool = False):
         """
         初始化爬虫
         
@@ -56,6 +56,7 @@ class DomainScraper(BaseScraper):
             profile_dir: Playwright 浏览器配置目录
         """
         super().__init__(config)
+        self.retain_session = retain_session
         self.profile_dir = profile_dir or os.path.join(os.getcwd(), 'domain_profile')
         self.browser = None
     
@@ -416,7 +417,7 @@ class DomainScraper(BaseScraper):
         except Exception as e:
             logger.error(f"详情爬取失败: {e}")
         finally:
-            if self.browser:
+            if self.browser and not self.retain_session:
                 self.browser.close()
                 self.browser = None
         

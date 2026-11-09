@@ -23,6 +23,28 @@ class Page:
 
 
 class BrowserTests(unittest.TestCase):
+    def test_verified_domain_document_is_kept_for_pagination_details_and_next_area(self):
+        browser = BrowserManager(browser_type=BrowserType.PLAYWRIGHT, source='domain')
+        page = MagicMock()
+        first = 'https://www.domain.com.au/rent/newtown-nsw-2042/?excludedeposittaken=1'
+        requests = [first + '&page=2',
+                    'https://www.domain.com.au/2-example-street-newtown-nsw-2042-18408242',
+                    'https://www.domain.com.au/rent/kensington-nsw-2033/?excludedeposittaken=1']
+        page.url = first
+        page.goto.return_value.status = 200
+        page.evaluate.side_effect = [dict(status=200, type='application/json', url=url,
+                                         body=json.dumps({'props': {'identity': url}})) for url in requests]
+        browser._playwright_page = page
+        browser.network_policy = MagicMock(proxied=False)
+        browser.network_policy.budget.exhausted = False
+        with patch.dict(os.environ, {'DOMAIN_SEARCH_TRANSPORT': 'html-then-json',
+                'DOMAIN_DETAIL_TRANSPORT': 'json', 'DOMAIN_NATIVE_NETWORK': 'true'}):
+            self.assertTrue(browser.navigate(first, wait_time=0))
+            for url in requests:
+                self.assertTrue(browser.navigate(url, wait_time=0))
+                self.assertEqual(browser.get_page_source()['props']['identity'], url)
+        page.goto.assert_called_once_with(first, timeout=60000, wait_until='domcontentloaded')
+
     def test_domain_ordinary_hk_browser_preserves_native_network_without_residential_routing(self):
         context=MagicMock();context.pages=[MagicMock()]
         with tempfile.TemporaryDirectory() as profile,patch.dict(os.environ,{

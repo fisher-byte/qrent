@@ -13,6 +13,43 @@ from src.services.sqlite_store import SQLiteStore
 
 
 class RunnerTests(unittest.TestCase):
+    def test_domain_keeps_one_live_session_and_closes_it_on_denial_without_blocking_realestate(self):
+        from recovery_runner import build_parser, capture
+        from unittest.mock import Mock
+        sessions, calls = [], []
+        class Domain:
+            def __init__(self, **kwargs):
+                self.browser = Mock()
+                self.last_run_error = None
+                sessions.append(self.browser)
+            def scrape_area(self, area):
+                calls.append(area)
+                self.browser.close.assert_not_called()
+                if area == 'waterloo-nsw-2017':
+                    self.last_run_error = 'HTTP403'
+                    return []
+                return [listing(house_id='100' if area.startswith('newtown') else '101')]
+        class RealEstate:
+            browser = None
+            def __init__(self, **kwargs): pass
+            def scrape_area(self, area): return [listing(PropertySource.REALESTATE, house_id='200')]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            profile = root / 'domain'
+            profile.mkdir(mode=0o700)
+            args = build_parser().parse_args(['--areas', 'newtown-nsw-2042', 'kensington-nsw-2033',
+                'waterloo-nsw-2017', 'redfern-nsw-2016', '--no-details', '--retries', '1',
+                '--skip-proxy-check', '--domain-profile', str(profile), '--db', str(root/'p.db'), '--output', tmp])
+            with patch.dict(os.environ, {'DOMAIN_SEARCH_TRANSPORT': 'html-then-json'}):
+                result = capture(args, factories={'domain': Domain, 'realestate': RealEstate})
+            self.assertEqual(len(sessions), 1)
+            sessions[0].close.assert_called_once()
+            self.assertEqual(calls, ['newtown-nsw-2042', 'kensington-nsw-2033', 'waterloo-nsw-2017'])
+            self.assertEqual(result['listings'], 3)
+            self.assertEqual(result['areas'][3]['attempts'], 0)
+            self.assertEqual(result['areas'][3]['error'], 'HTTP403SourcePaused')
+            self.assertTrue(all(a['count'] >= 0 and 'error' not in a for a in result['areas'][4:]))
+
     def test_a_failed_ip_check_after_rotation_cannot_reuse_the_previous_exit(self):
         from recovery_runner import build_parser, capture
         observed=[]

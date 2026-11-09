@@ -126,6 +126,7 @@ def capture(args, factories=None):
         return result
     store = None
     owned_profiles = set()
+    retained_domain = None
     try:
         store = SQLiteStore(args.db)
         references = [] if args.full_details else store.recent()
@@ -180,6 +181,7 @@ def capture(args, factories=None):
                     if dedicated_profile is None:
                         owned_profiles.add(profile)
                     scraper = None
+                    attempt_complete = False
                     try:
                         if dedicated_profile is not None and (not profile.is_absolute() or profile.resolve() != profile
                                 or not profile.is_dir() or profile.stat().st_mode & 0o077):
@@ -194,7 +196,10 @@ def capture(args, factories=None):
                                        profile_dir=str(profile))
                         if source == 'realestate':
                             options['geoip_address'] = verified_ip
-                        scraper = factories[source](**options)
+                        if dedicated_profile is not None:
+                            options['retain_session'] = True
+                        scraper = (retained_domain if dedicated_profile is not None and retained_domain is not None
+                                   else factories[source](**options))
                         props = scraper.scrape_area(area)
                         # A nonempty prefix followed by an error is still incomplete.
                         if not props or getattr(scraper, "last_run_error", None):
@@ -244,6 +249,7 @@ def capture(args, factories=None):
                             collected[(source, prop.house_id)] = prop
                         references.extend(props)
                         write_csv(props, args.output / f"{tag}_{source}_{area}.csv")
+                        attempt_complete = True
                         break
                     except Exception as exc:
                         logger.error("%s %s attempt %s failed: %s", source, area, attempt + 1, type(exc).__name__)
@@ -257,10 +263,19 @@ def capture(args, factories=None):
                             item["error"] = type(exc).__name__
                             result["errors"].append({"source": source, "area": area, "error": item["error"]})
                     finally:
-                        if getattr(scraper, "browser", None):
-                            scraper.browser.close()
-                            scraper.browser = None
+                        if dedicated_profile is not None and attempt_complete and not source_denied and not budget.exhausted:
+                            retained_domain = scraper
+                        else:
+                            if getattr(scraper, "browser", None):
+                                scraper.browser.close()
+                                scraper.browser = None
+                            if scraper is retained_domain:
+                                retained_domain = None
                 result["areas"].append(item)
+            if getattr(retained_domain, 'browser', None):
+                retained_domain.browser.close()
+                retained_domain.browser = None
+            retained_domain = None
         result["listings"] = len(collected)
         result["captured_source_ids"] = [list(identity) for identity in collected]
         if not result["errors"] and collected:
@@ -271,6 +286,9 @@ def capture(args, factories=None):
         result["errors"].append({"stage": "preflight", "error": type(exc).__name__})
         logger.error("Capture stopped: %s", type(exc).__name__)
     finally:
+        if getattr(retained_domain, 'browser', None):
+            retained_domain.browser.close()
+            retained_domain.browser = None
         if not args.keep_profiles:
             for profile in owned_profiles:
                 shutil.rmtree(profile, ignore_errors=True)

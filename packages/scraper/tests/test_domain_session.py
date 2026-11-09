@@ -14,6 +14,20 @@ DETAIL_URL = "https://www.domain.com.au/2-10-example-street-melbourne-vic-3000-1
 
 
 class DomainSessionTests(unittest.TestCase):
+    def test_runner_owned_session_survives_detail_processing(self):
+        browser = Mock()
+        browser.navigate.return_value = True
+        prop = listing(url=DETAIL_URL)
+        browser.get_page_source.return_value = {'props': {'rootGraphQuery': {'listingByIdV2': {
+            'id': prop.house_id, 'description': 'Verified source description.'}}}}
+        scraper = DomainScraper(ScraperConfig(retain_browser=True), retain_session=True)
+        scraper.browser = browser
+        with patch.dict(os.environ, {'DOMAIN_DETAIL_TRANSPORT': 'json'}), patch('src.scrapers.domain.time.sleep'):
+            scraper.scrape_property_details([prop])
+        self.assertIn('Verified source description.', prop.description_en)
+        self.assertIs(scraper.browser, browser)
+        browser.close.assert_not_called()
+
     def test_detail_url_keeps_the_source_listing_id_and_normalizes_legacy_links(self):
         canonical = "https://www.domain.com.au/35-trade-winds-drive-helensvale-qld-4212-2021281625"
         scraper = DomainScraper()

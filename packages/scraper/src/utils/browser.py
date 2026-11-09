@@ -366,6 +366,7 @@ class BrowserManager:
                 search_transport = os.getenv('DOMAIN_SEARCH_TRANSPORT')
                 hybrid = self.source == 'domain' and search_transport == 'html-then-json'
                 first_hybrid_page = (hybrid and is_search_path
+                                     and not self._domain_search_primed
                                      and parse_qs(target.query).get('page', ['1']) == ['1'])
                 if first_hybrid_page:
                     self._domain_search_primed = False
@@ -414,6 +415,9 @@ class BrowserManager:
                         and landed.path.startswith('/rent/'))
                     if not self._domain_search_primed:
                         return False
+                    # This document already established a valid same-origin session.
+                    # Loading the homepage again discards its live search context.
+                    self._domain_home_ready = True
                 if self.network_policy and self.network_policy.budget.exhausted:
                     logger.error("Network budget reached")
                     return False
