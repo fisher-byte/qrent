@@ -166,9 +166,9 @@ class BrowserManager:
             ordinary_domain=os.getenv('DOMAIN_BROWSER_PROXY','').strip() if self.source=='domain' else ''
             ordinary_ip=None
             if ordinary_domain:
-                if (ordinary_domain!='socks5://127.0.0.1:18082' or proxy or
+                if (ordinary_domain not in {'socks5://127.0.0.1:18082', 'socks5://127.0.0.1:18084'} or proxy or
                         os.getenv('DOMAIN_NATIVE_NETWORK','').lower()!='true'):
-                    raise ValueError('Domain ordinary egress requires its verified native HK route, without residential transport')
+                    raise ValueError('Domain ordinary egress requires a verified native loopback route, without residential transport')
                 ordinary_ip=str(ipaddress.ip_address(os.environ.get('DOMAIN_PROXY_IP','')))
             if proxy:
                 self.egress_proxy = EgressProxy(proxy, get_run_budget()).__enter__()
@@ -372,6 +372,10 @@ class BrowserManager:
                     self._domain_search_primed = False
                     self._domain_home_ready = False
                     self._require_domain_native(target)
+                    if os.getenv('DOMAIN_HOME_BOOTSTRAP', '').lower() == 'true':
+                        if not self._bootstrap_domain_home():
+                            return False
+                        self._navigation_status = None
                 if (self.source == 'domain' and
                         ((is_search_path and (search_transport == 'json' or (hybrid and not first_hybrid_page))) or
                          (not is_search_path and os.getenv('DOMAIN_DETAIL_TRANSPORT') == 'json'
@@ -438,6 +442,27 @@ class BrowserManager:
                 or not self.network_policy or self.network_policy.proxied
                 or os.getenv('DOMAIN_NATIVE_NETWORK', '').lower() != 'true'):
             raise ValueError('Domain requests require its ordinary native browser network')
+
+    def _bootstrap_domain_home(self):
+        """Allow the site's normal first-visit scripts to establish this private session."""
+        page = self.get_driver()
+        if self.network_policy.budget.exhausted:
+            return False
+        response = page.goto('https://www.domain.com.au/', wait_until='domcontentloaded', timeout=45000)
+        self._navigation_status = self._navigation_status or (response.status if response else 0)
+        if self._navigation_status >= 400 or not self._navigation_status:
+            return False
+        page.wait_for_timeout(7000)
+        page.wait_for_load_state('domcontentloaded', timeout=15000)
+        landed = urlsplit(page.url)
+        if (self._navigation_status != 200 or landed.scheme != 'https'
+                or landed.netloc != 'www.domain.com.au' or landed.path != '/'
+                or self.network_policy.budget.exhausted):
+            return False
+        page.wait_for_selector('script#__NEXT_DATA__', state='attached', timeout=12000)
+        page.wait_for_selector('input[placeholder]', state='attached', timeout=12000)
+        self._domain_home_ready = True
+        return True
 
     def _fetch_domain_search(self, url):
         """Use Domain's public GET search format in its own ordinary browser session."""

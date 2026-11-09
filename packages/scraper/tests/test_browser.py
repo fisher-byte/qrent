@@ -23,6 +23,46 @@ class Page:
 
 
 class BrowserTests(unittest.TestCase):
+    def test_domain_bootstraps_home_once_before_first_search_and_keeps_verified_session(self):
+        browser = BrowserManager(browser_type=BrowserType.PLAYWRIGHT, source='domain')
+        page = MagicMock()
+        first = 'https://www.domain.com.au/rent/newtown-nsw-2042/?excludedeposittaken=1'
+        second = first + '&page=2'
+        def navigate(url, **kwargs):
+            page.url = url
+            return MagicMock(status=200)
+        page.goto.side_effect = navigate
+        page.evaluate.return_value = dict(status=200, type='application/json', url=second,
+                                         body=json.dumps({'props': {'currentPage': 2}}))
+        browser._playwright_page = page
+        browser.network_policy = MagicMock(proxied=False)
+        browser.network_policy.budget.exhausted = False
+        with patch.dict(os.environ, {'DOMAIN_SEARCH_TRANSPORT': 'html-then-json',
+                'DOMAIN_HOME_BOOTSTRAP': 'true', 'DOMAIN_NATIVE_NETWORK': 'true'}):
+            self.assertTrue(browser.navigate(first, wait_time=0))
+            self.assertTrue(browser.navigate(second, wait_time=0))
+        self.assertEqual([call.args[0] for call in page.goto.call_args_list],
+                         ['https://www.domain.com.au/', first])
+        self.assertTrue(browser._domain_search_primed)
+        self.assertTrue(browser._domain_home_ready)
+
+    def test_rejected_domain_home_never_requests_search_or_marks_session_ready(self):
+        browser = BrowserManager(browser_type=BrowserType.PLAYWRIGHT, source='domain')
+        page = MagicMock()
+        page.goto.return_value.status = 403
+        page.url = 'https://www.domain.com.au/'
+        browser._playwright_page = page
+        browser.network_policy = MagicMock(proxied=False)
+        browser.network_policy.budget.exhausted = False
+        with patch.dict(os.environ, {'DOMAIN_SEARCH_TRANSPORT': 'html-then-json',
+                'DOMAIN_HOME_BOOTSTRAP': 'true', 'DOMAIN_NATIVE_NETWORK': 'true'}):
+            self.assertFalse(browser.navigate('https://www.domain.com.au/rent/newtown-nsw-2042/'))
+        self.assertEqual([call.args[0] for call in page.goto.call_args_list], ['https://www.domain.com.au/'])
+        self.assertEqual(browser._navigation_status, 403)
+        self.assertFalse(browser._domain_home_ready)
+        self.assertFalse(browser._domain_search_primed)
+        page.evaluate.assert_not_called()
+
     def test_verified_domain_document_is_kept_for_pagination_details_and_next_area(self):
         browser = BrowserManager(browser_type=BrowserType.PLAYWRIGHT, source='domain')
         page = MagicMock()
@@ -72,6 +112,24 @@ class BrowserTests(unittest.TestCase):
                 browser=BrowserManager(browser_type=BrowserType.PLAYWRIGHT,source='domain',profile_dir=profile)
                 with self.assertRaises(ValueError):browser.create_driver()
                 residential.assert_not_called()
+
+    def test_domain_dedicated_vpn_loopback_keeps_native_transport(self):
+        context = MagicMock(); context.pages = [MagicMock()]
+        with tempfile.TemporaryDirectory() as profile, patch.dict(os.environ, {
+                'DOMAIN_BROWSER_ENGINE': 'patchright', 'DOMAIN_NATIVE_NETWORK': 'true',
+                'DOMAIN_BROWSER_PROXY': 'socks5://127.0.0.1:18084', 'DOMAIN_PROXY_IP': '203.0.113.9'}, clear=True), \
+                patch('patchright.sync_api.sync_playwright') as driver, \
+                patch('src.utils.browser.EgressProxy') as residential, patch('src.utils.browser.time.sleep'):
+            launch = driver.return_value.start.return_value.chromium.launch_persistent_context
+            launch.return_value = context
+            browser = BrowserManager(browser_type=BrowserType.PLAYWRIGHT, source='domain', profile_dir=profile)
+            try:
+                browser.create_driver()
+                self.assertEqual(launch.call_args.kwargs['proxy'], {'server': 'socks5://127.0.0.1:18084'})
+                self.assertFalse(browser.network_policy.proxied)
+                context.route.assert_not_called(); residential.assert_not_called()
+            finally:
+                browser.close()
 
     def test_domain_detail_json_does_not_navigate_an_html_page_and_load_its_assets(self):
         browser=BrowserManager(browser_type=BrowserType.PLAYWRIGHT,source='domain')
