@@ -61,6 +61,29 @@ class EmbeddedListingTests(unittest.TestCase):
                          ('2/10 Example Street', 'VIC', '3053', 0))
         self.assertEqual(props[0].price_per_week, 0)
 
+    def test_domain_uses_its_own_listing_url_instead_of_other_card_links(self):
+        canonical = "https://www.domain.com.au/407-130-carillon-avenue-newtown-nsw-2042-15903335"
+        data = {"props": {"pageProps": {"componentProps": {
+            "listingSearchResultIds": [15903335],
+            "listingsMap": {"15903335": {"listingModel": {
+                "url": "//domain.com.au/407-130-carillon-avenue-newtown-nsw-2042-15903335?topspot=1",
+            }}},
+        }}}}
+        html = '<script id="__NEXT_DATA__">' + json.dumps(data) + '</script>'
+        html += '''<li data-testid="listing-15903335">
+          <a href="https://example.com/407-130-carillon-avenue-newtown-nsw-2042-15903335">Ad</a>
+          <span data-testid="address-line1">407/130 Carillon Avenue</span>
+          <span data-testid="address-line2">Newtown NSW 2042</span>
+          <p data-testid="listing-card-price">$700 per week</p></li>'''
+        prop, = DomainScraper().parse_listing_page(html)
+        self.assertEqual((prop.house_id, prop.url, prop.address_line1, prop.price_per_week),
+                         ("15903335", canonical, "407/130 Carillon Avenue", 700))
+        data["props"]["pageProps"]["componentProps"]["listingsMap"]["15903335"]["listingModel"]["url"] = (
+            "/407-130-carillon-avenue-newtown-nsw-2042-15903336"
+        )
+        invalid = '<script id="__NEXT_DATA__">' + json.dumps(data) + '</script>' + html.split('</script>', 1)[1]
+        self.assertEqual(DomainScraper().parse_listing_page(invalid), [])
+
     def test_list_response_supplies_description_location_and_date_without_detail_request(self):
         props = RealEstateScraper().parse_listing_page(listing_html([embedded_listing()]))
         self.assertEqual(len(props), 1)

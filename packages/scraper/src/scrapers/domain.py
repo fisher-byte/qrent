@@ -8,6 +8,7 @@ import time
 import logging
 from typing import List, Optional, Any
 from datetime import datetime
+from urllib.parse import unquote, urljoin, urlsplit
 from bs4 import BeautifulSoup
 
 from .base import BaseScraper
@@ -63,11 +64,24 @@ class DomainScraper(BaseScraper):
         return f"{self.BASE_URL}/rent/{area}/?excludedeposittaken=1"
     
     def get_detail_url(self, property_data: PropertyData) -> str:
-        """获取房产详情页 URL"""
-        if property_data.url:
-            return property_data.url
-        combined_address = property_data.get_combined_address()
-        return f"{self.BASE_URL}/{combined_address}/"
+        """Use the source link for this listing, without guessing its address slug."""
+        return self._listing_url(property_data.url, property_data.house_id)
+
+    @classmethod
+    def _listing_url(cls, href: str, house_id: str) -> str:
+        if not isinstance(href, str) or not href.strip() or not re.fullmatch(r"[0-9]+", str(house_id)):
+            return ""
+        try:
+            target = urlsplit(urljoin(cls.BASE_URL + "/", href.strip()))
+        except ValueError:
+            return ""
+        if target.scheme not in {"http", "https"} or target.netloc.lower() not in {"domain.com.au", "www.domain.com.au"}:
+            return ""
+        path = target.path.removesuffix("/")
+        suffix = "-" + str(house_id)
+        if not path.endswith(suffix) or not re.fullmatch(r"/[^/\\?#\s]+" + suffix, unquote(path)):
+            return ""
+        return cls.BASE_URL + path
     
     def scrape_area(self, area: str) -> List[PropertyData]:
         """
@@ -118,11 +132,6 @@ class DomainScraper(BaseScraper):
                 if not page_properties:
                     logger.info(f"第 {page} 页没有找到房源，停止")
                     break
-                
-                # 为每个房源设置 URL
-                for prop in page_properties:
-                    if not prop.url:
-                        prop.url = self.get_detail_url(prop)
                 
                 properties.extend(page_properties)
                 logger.info(f"第 {page} 页找到 {len(page_properties)} 个房源")
@@ -192,7 +201,7 @@ class DomainScraper(BaseScraper):
                 logger.debug(f"解析房源失败: {e}")
         
         self._complete_embedded(properties, soup)
-        return properties
+        return [prop for prop in properties if prop.url]
 
     def _complete_embedded(self, properties, soup):
         data = domain_search(soup)
@@ -204,11 +213,9 @@ class DomainScraper(BaseScraper):
             house_id = str(value)
             model = (data.get('listingsMap', {}).get(house_id) or {}).get('listingModel') or {}
             address, features = model.get('address') or {}, model.get('features') or {}
-            url = model.get('url') or ''
-            if url.startswith('/'):
-                url = self.BASE_URL + url
+            url = self._listing_url(model.get('url'), house_id)
             if house_id not in by_id:
-                if not url.startswith(self.BASE_URL + '/'):
+                if not url:
                     continue
                 prop = PropertyData(house_id=house_id, source=self.SOURCE,
                     price_per_week=extract_price(model.get('price', '')),
@@ -216,6 +223,8 @@ class DomainScraper(BaseScraper):
                 properties.append(prop)
                 by_id[house_id] = prop
             prop = by_id[house_id]
+            if url:
+                prop.url = url
             quote = model.get('price')
             if isinstance(quote, str) and quote.strip():
                 prop.price_text = quote.strip()
@@ -276,12 +285,10 @@ class DomainScraper(BaseScraper):
         
         # 获取详情页 URL
         url = ""
-        link = listing.find('a', href=lambda h: bool(h and house_id and
-            re.search(r'-' + re.escape(house_id) + r'(?:[/?#]|$)', str(h))))
-        if link:
-            href = link.get('href', '')
-            if href:
-                url = f"{self.BASE_URL}{href}" if href.startswith('/') else href
+        for link in listing.find_all('a', href=True):
+            url = self._listing_url(link['href'], house_id)
+            if url:
+                break
 
         # Current cards put the suburb in address-line2 and state/postcode in the canonical URL.
         location = re.search(r'-(nsw|vic|qld|sa|wa|tas|nt|act)-(\d{4})-\d+(?:[/?#]|$)', url, re.I)
@@ -299,7 +306,7 @@ class DomainScraper(BaseScraper):
             if src and is_valid_image_url(src):
                 thumbnail_url = src
         
-        if not house_id or not address_line1 or not url:
+        if not house_id or not address_line1:
             return None
         
         return PropertyData(
@@ -350,7 +357,13 @@ class DomainScraper(BaseScraper):
         """
         爬取房产详情页 - 使用 Playwright
         """
-        to_scrape = [p for p in properties if not (skip_existing and p.description_en)]
+        to_scrape = []
+        for prop in properties:
+            if skip_existing and prop.description_en:
+                continue
+            url = self.get_detail_url(prop)
+            if url:
+                to_scrape.append((prop, url))
         
         if not to_scrape:
             logger.info("没有需要爬取详情的房产")
@@ -368,12 +381,8 @@ class DomainScraper(BaseScraper):
                 )
                 self.browser.create_driver()
             
-            for i, prop in enumerate(to_scrape):
+            for i, (prop, url) in enumerate(to_scrape):
                 try:
-                    url = prop.url or self.get_detail_url(prop)
-                    if not url:
-                        continue
-                    
                     logger.debug(f"爬取详情 ({i+1}/{len(to_scrape)}): {url}")
                     
                     if not self.browser.navigate(url, wait_time=3.0):
